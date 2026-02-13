@@ -1,11 +1,22 @@
 """Tests for HART-IP protocol structs and helpers."""
 
-from hartip.constants import HARTIP_HEADER_SIZE, HARTFrameType, HARTIPMessageType
+import pytest
+
+from hartip.constants import (
+    HARTIP_HEADER_SIZE,
+    HARTFrameType,
+    HARTIPMessageID,
+    HARTIPMessageType,
+)
 from hartip.protocol import (
     HARTIPHeader,
     HARTPdu,
+    build_keep_alive,
     build_pdu,
     build_request,
+    build_session_close,
+    build_session_init,
+    parse_pdu,
     parse_response,
     xor_checksum,
 )
@@ -92,6 +103,22 @@ class TestBuildPdu:
         assert raw[3] == 3  # byte_count field
         assert raw[-1] == xor_checksum(raw[:-1])
 
+    def test_data_too_long_raises(self) -> None:
+        data = bytes(256)
+        with pytest.raises(ValueError, match="exceeds maximum of 255"):
+            build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 0, data)
+
+    def test_data_max_255(self) -> None:
+        data = bytes(255)
+        raw = build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 0, data)
+        assert raw[3] == 255
+
+    def test_long_frame(self) -> None:
+        addr = bytes([0x80, 0x26, 0x01, 0x02, 0x03])
+        raw = build_pdu(HARTFrameType.LONG_FRAME, addr, 0)
+        assert len(raw) == 9  # delimiter(1) + addr(5) + cmd(1) + bc(1) + cksum(1)
+        assert raw[-1] == xor_checksum(raw[:-1])
+
 
 class TestBuildRequest:
     def test_builds_valid_frame(self) -> None:
@@ -131,3 +158,145 @@ class TestParseResponse:
         result = parse_response(hdr + pdu_raw)
         assert result["pdu"] is not None
         assert result["pdu"].command == 0
+
+    def test_truncated_payload_raises(self) -> None:
+        hdr = HARTIPHeader.build(
+            dict(version=1, msg_type=1, msg_id=3, status=0, sequence=1, byte_count=20)
+        )
+        with pytest.raises(ValueError, match="truncated"):
+            parse_response(hdr + b"\x02\x00\x00")
+
+    def test_too_short_raises(self) -> None:
+        with pytest.raises(ValueError, match="too short"):
+            parse_response(b"\x01\x02\x03")
+
+
+# ---------------------------------------------------------------------------
+# parse_pdu
+# ---------------------------------------------------------------------------
+
+
+class TestParsePdu:
+    def test_short_frame_no_preamble(self) -> None:
+        raw = build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 0)
+        pdu = parse_pdu(raw)
+        assert pdu.delimiter == 0x02
+        assert pdu.address == b"\x00"
+        assert pdu.command == 0
+        assert pdu.byte_count == 0
+        assert pdu.preamble_count == 0
+        assert pdu.expansion_bytes == b""
+
+    def test_long_frame_no_preamble(self) -> None:
+        addr = bytes([0x80, 0x26, 0x01, 0x02, 0x03])
+        raw = build_pdu(HARTFrameType.LONG_FRAME, addr, 0)
+        pdu = parse_pdu(raw)
+        assert pdu.delimiter == 0x82
+        assert pdu.address == addr
+        assert pdu.command == 0
+
+    def test_with_preamble(self) -> None:
+        preamble = b"\xFF\xFF\xFF\xFF\xFF"
+        raw = preamble + build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 0)
+        pdu = parse_pdu(raw)
+        assert pdu.preamble_count == 5
+        assert pdu.command == 0
+
+    def test_with_data(self) -> None:
+        data = bytes([0x00, 0x00, 0x01, 0x02, 0x03])
+        raw = build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 3, data)
+        pdu = parse_pdu(raw)
+        assert pdu.command == 3
+        assert pdu.byte_count == 5
+        assert bytes(pdu.data) == data
+
+    def test_expansion_bytes(self) -> None:
+        # Delimiter with 1 expansion byte (bits 5-6 = 01 → 0x22)
+        delim = 0x02 | (1 << 5)  # 0x22
+        frame_no_cksum = bytes([delim, 0x00, 0xAA, 0x00, 0x00])
+        cksum = xor_checksum(frame_no_cksum)
+        raw = frame_no_cksum + bytes([cksum])
+        pdu = parse_pdu(raw)
+        assert pdu.expansion_bytes == bytes([0xAA])
+        assert pdu.command == 0
+        assert pdu.byte_count == 0
+
+    def test_ack_short_frame(self) -> None:
+        # ACK short frame (0x06) - response delimiter
+        frame_no_cksum = bytes([0x06, 0x00, 0x00, 0x00])
+        cksum = xor_checksum(frame_no_cksum)
+        raw = frame_no_cksum + bytes([cksum])
+        pdu = parse_pdu(raw)
+        assert pdu.delimiter == 0x06
+        assert len(pdu.address) == 1  # short frame (bit 7 clear)
+
+    def test_ack_long_frame(self) -> None:
+        # ACK long frame (0x86) - response delimiter
+        addr = bytes([0x80, 0x26, 0x01, 0x02, 0x03])
+        frame_no_cksum = bytes([0x86]) + addr + bytes([0x00, 0x00])
+        cksum = xor_checksum(frame_no_cksum)
+        raw = frame_no_cksum + bytes([cksum])
+        pdu = parse_pdu(raw)
+        assert pdu.delimiter == 0x86
+        assert len(pdu.address) == 5  # long frame (bit 7 set)
+
+    def test_only_preambles_raises(self) -> None:
+        with pytest.raises(ValueError, match="only preamble"):
+            parse_pdu(b"\xFF\xFF\xFF")
+
+    def test_empty_raises(self) -> None:
+        with pytest.raises(ValueError, match="only preamble"):
+            parse_pdu(b"")
+
+    def test_truncated_address_raises(self) -> None:
+        # Long frame delimiter but only 2 address bytes
+        with pytest.raises(ValueError, match="too short"):
+            parse_pdu(bytes([0x82, 0x00, 0x00]))
+
+
+# ---------------------------------------------------------------------------
+# Session builders
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSessionInit:
+    def test_structure(self) -> None:
+        frame = build_session_init(sequence=1)
+        assert len(frame) == HARTIP_HEADER_SIZE + 5  # 5-byte payload
+        hdr = HARTIPHeader.parse(frame[:HARTIP_HEADER_SIZE])
+        assert hdr.version == 1
+        assert hdr.msg_type == HARTIPMessageType.REQUEST
+        assert hdr.msg_id == HARTIPMessageID.SESSION_INITIATE
+        assert hdr.sequence == 1
+        assert hdr.byte_count == len(frame)
+
+    def test_payload_master_type(self) -> None:
+        frame = build_session_init(sequence=1, master_type=0)
+        payload = frame[HARTIP_HEADER_SIZE:]
+        assert payload[0] == 0  # secondary master
+
+    def test_payload_inactivity_timer(self) -> None:
+        import struct
+        frame = build_session_init(sequence=1, inactivity_timer=60000)
+        payload = frame[HARTIP_HEADER_SIZE:]
+        timer = struct.unpack(">I", payload[1:5])[0]
+        assert timer == 60000
+
+
+class TestBuildSessionClose:
+    def test_structure(self) -> None:
+        frame = build_session_close(sequence=5)
+        assert len(frame) == HARTIP_HEADER_SIZE  # no payload
+        hdr = HARTIPHeader.parse(frame[:HARTIP_HEADER_SIZE])
+        assert hdr.msg_id == HARTIPMessageID.SESSION_CLOSE
+        assert hdr.sequence == 5
+        assert hdr.byte_count == HARTIP_HEADER_SIZE
+
+
+class TestBuildKeepAlive:
+    def test_structure(self) -> None:
+        frame = build_keep_alive(sequence=10)
+        assert len(frame) == HARTIP_HEADER_SIZE
+        hdr = HARTIPHeader.parse(frame[:HARTIP_HEADER_SIZE])
+        assert hdr.msg_id == HARTIPMessageID.KEEP_ALIVE
+        assert hdr.sequence == 10

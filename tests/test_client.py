@@ -1,12 +1,20 @@
 """Tests for HART-IP client (unit tests with mocked sockets)."""
 
 import struct
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from hartip.client import HARTIPClient, HARTIPResponse
-from hartip.constants import HARTIP_HEADER_SIZE, HARTFrameType, HARTIPMessageType, HARTIPStatus
+from hartip.constants import (
+    HARTIP_HEADER_SIZE,
+    HARTFrameType,
+    HARTIPMessageType,
+    HARTIPStatus,
+    HARTResponseCode,
+)
 from hartip.device import DeviceInfo, Variable, parse_cmd0, parse_cmd1, parse_cmd3
 from hartip.exceptions import HARTIPConnectionError, HARTIPStatusError
 from hartip.protocol import HARTIPHeader, build_pdu, xor_checksum
@@ -261,9 +269,266 @@ class TestParseCmd3:
         payload = struct.pack(">f", 4.0)  # current
         for unit, val in [(7, 1.0), (32, 25.0), (57, 50.0), (39, 4.0)]:
             payload += bytes([unit]) + struct.pack(">f", val)
-        variables = parse_cmd3(payload)
+        result = parse_cmd3(payload)
+        assert result["loop_current"] == 4.0
+        variables = result["variables"]
         assert len(variables) == 4
         assert variables[0].label == "PV"
         assert variables[0].unit_name == "bar"
         assert variables[1].label == "SV"
         assert variables[1].unit_name == "degC"
+
+
+# ---------------------------------------------------------------------------
+# HARTIPResponse – new comm_error field
+# ---------------------------------------------------------------------------
+
+
+class TestHARTIPResponseCommError:
+    def test_comm_error_not_success(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0x90, comm_error=True)
+        assert resp.comm_error is True
+        assert resp.success is False
+
+    def test_comm_error_message(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0xC0, comm_error=True)
+        assert "Communication error" in resp.error_message
+
+    def test_no_comm_error_success(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0, comm_error=False)
+        assert resp.success is True
+        assert resp.comm_error is False
+
+    def test_unknown_error_code(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=250)
+        assert "Unknown error code" in resp.error_message
+
+
+# ---------------------------------------------------------------------------
+# Client – double-connect closes existing socket
+# ---------------------------------------------------------------------------
+
+
+class TestDoubleConnect:
+    def test_close_called_on_reconnect(self) -> None:
+        session_resp = _build_session_init_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock1 = MagicMock()
+            mock_sock2 = MagicMock()
+            mock_sock_cls.side_effect = [mock_sock1, mock_sock2]
+            mock_sock1.recvfrom.return_value = (session_resp, _ADDR)
+            mock_sock2.recvfrom.return_value = (session_resp, _ADDR)
+
+            client = HARTIPClient("127.0.0.1", protocol="udp")
+            client.connect()
+            assert client.connected
+            client.connect()  # Should close old socket first
+            mock_sock1.close.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Client – use_long_frame without unique_addr
+# ---------------------------------------------------------------------------
+
+
+class TestUseLongFrame:
+    def test_raises_without_unique_addr(self) -> None:
+        session_resp = _build_session_init_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.return_value = (session_resp, _ADDR)
+
+            client = HARTIPClient("127.0.0.1", protocol="udp")
+            client.connect()
+            with pytest.raises(ValueError, match="unique_addr"):
+                client.send_command(0, use_long_frame=True)
+
+    def test_works_with_unique_addr(self) -> None:
+        session_resp = _build_session_init_response()
+        cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
+        close_resp = _build_session_close_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.side_effect = [
+                (session_resp, _ADDR),
+                (cmd_resp, _ADDR),
+                (close_resp, _ADDR),
+            ]
+
+            client = HARTIPClient("127.0.0.1", protocol="udp")
+            client.connect()
+            addr = bytes([0x80, 0x26, 0x01, 0x02, 0x03])
+            resp = client.send_command(0, use_long_frame=True, unique_addr=addr)
+            assert resp.response_code == 0
+            client.close()
+
+
+# ---------------------------------------------------------------------------
+# Client – extended command (cmd > 253)
+# ---------------------------------------------------------------------------
+
+
+class TestExtendedCommand:
+    def test_cmd_768_wrapped_in_cmd_31(self) -> None:
+        session_resp = _build_session_init_response()
+        cmd_resp = _build_mock_response(command=31, payload=b"\x00" * 4)
+        close_resp = _build_session_close_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.side_effect = [
+                (session_resp, _ADDR),
+                (cmd_resp, _ADDR),
+                (close_resp, _ADDR),
+            ]
+
+            client = HARTIPClient("127.0.0.1", protocol="udp")
+            client.connect()
+            resp = client.send_command(768)  # Should wrap in cmd 31
+            # Verify the sent frame contains command 31
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            # pdu_bytes: delimiter(1) + addr(1) + cmd(1) + bc(1) + data + cksum(1)
+            assert pdu_bytes[2] == 31  # wire command is 31
+            # First 2 data bytes should be 0x0300 (768 big-endian)
+            data_start = 4  # after delimiter, addr, cmd, byte_count
+            assert pdu_bytes[data_start] == 0x03
+            assert pdu_bytes[data_start + 1] == 0x00
+            client.close()
+
+
+# ---------------------------------------------------------------------------
+# Client – communication error detection
+# ---------------------------------------------------------------------------
+
+
+class TestCommErrorDetection:
+    def test_comm_error_in_response(self) -> None:
+        session_resp = _build_session_init_response()
+        # Build response with MSB set in response code byte
+        cmd_resp = _build_mock_response(command=0, response_code=0xC0)
+        close_resp = _build_session_close_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.side_effect = [
+                (session_resp, _ADDR),
+                (cmd_resp, _ADDR),
+                (close_resp, _ADDR),
+            ]
+
+            client = HARTIPClient("127.0.0.1", protocol="udp")
+            client.connect()
+            resp = client.send_command(0)
+            assert resp.comm_error is True
+            assert resp.response_code == 0xC0
+            assert not resp.success
+            client.close()
+
+
+# ---------------------------------------------------------------------------
+# Client – convenience wrappers
+# ---------------------------------------------------------------------------
+
+
+class TestConvenienceMethods:
+    def _make_connected_client(self, mock_sock):
+        session_resp = _build_session_init_response()
+        mock_sock.recvfrom.side_effect = [
+            (session_resp, _ADDR),
+        ]
+        client = HARTIPClient("127.0.0.1", protocol="udp")
+        client.connect()
+        return client
+
+    def test_read_unique_id(self) -> None:
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_unique_id()
+            assert resp.response_code == 0
+
+    def test_read_primary_variable(self) -> None:
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=1, payload=bytes([7]) + struct.pack(">f", 1.5))
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_primary_variable()
+            assert resp.response_code == 0
+
+    def test_read_device_vars_status(self) -> None:
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=9, payload=b"\x00" * 9)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_device_vars_status()
+            assert resp.response_code == 0
+
+    def test_read_message(self) -> None:
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=12, payload=b"\x00" * 24)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_message()
+            assert resp.response_code == 0
+
+    def test_read_pv_info(self) -> None:
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=14, payload=b"\x00" * 16)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_pv_info()
+            assert resp.response_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Client – delayed-response retry
+# ---------------------------------------------------------------------------
+
+
+class TestDelayedResponse:
+    def test_dr_retry_succeeds(self) -> None:
+        session_resp = _build_session_init_response()
+        # First response: DR_RUNNING (code 34)
+        dr_resp = _build_mock_response(command=0, response_code=34, payload=b"\x00" * 12)
+        # Second response: success
+        ok_resp = _build_mock_response(command=0, response_code=0, payload=b"\x00" * 12)
+        close_resp = _build_session_close_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.side_effect = [
+                (session_resp, _ADDR),
+                (dr_resp, _ADDR),     # initial command → DR
+                (ok_resp, _ADDR),     # retry → success
+                (close_resp, _ADDR),
+            ]
+
+            client = HARTIPClient(
+                "127.0.0.1", protocol="udp",
+                dr_retries=5, dr_retry_delay=1,  # 1ms delay for testing
+            )
+            client.connect()
+            resp = client.send_command(0)
+            assert resp.response_code == 0
+            assert resp.success
+            client.close()

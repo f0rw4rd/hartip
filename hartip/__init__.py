@@ -17,6 +17,7 @@ Quickstart::
 from .ascii import pack_ascii, unpack_ascii
 from .client import HARTIPClient, HARTIPResponse
 from .constants import (
+    COMM_ERROR_MASK,
     DEFAULT_INACTIVITY_TIMER,
     HARTIP_HEADER_SIZE,
     HARTIP_TCP_PORT,
@@ -24,6 +25,7 @@ from .constants import (
     MASTER_TYPE_PRIMARY,
     MASTER_TYPE_SECONDARY,
     HARTCommand,
+    HARTCommErrorFlags,
     HARTDeviceStatus,
     HARTFrameType,
     HARTIPMessageID,
@@ -34,16 +36,25 @@ from .constants import (
 )
 from .device import (
     DeviceInfo,
+    DeviceVariable,
     Variable,
+    decode_comm_error_flags,
+    is_comm_error,
     parse_cmd0,
     parse_cmd1,
     parse_cmd2,
     parse_cmd3,
+    parse_cmd9,
+    parse_cmd12,
     parse_cmd13,
+    parse_cmd14,
+    parse_cmd15,
     parse_cmd20,
+    parse_cmd48,
 )
 from .exceptions import (
     HARTChecksumError,
+    HARTCommunicationError,
     HARTError,
     HARTIPConnectionError,
     HARTIPError,
@@ -60,6 +71,7 @@ from .protocol import (
     build_request,
     build_session_close,
     build_session_init,
+    parse_pdu,
     parse_response,
     xor_checksum,
 )
@@ -80,6 +92,7 @@ __all__ = [
     "build_request",
     "build_session_close",
     "build_session_init",
+    "parse_pdu",
     "parse_response",
     "xor_checksum",
     # Constants / enums
@@ -91,6 +104,8 @@ __all__ = [
     "HARTCommand",
     "HARTResponseCode",
     "HARTDeviceStatus",
+    "HARTCommErrorFlags",
+    "COMM_ERROR_MASK",
     "HARTIP_HEADER_SIZE",
     "HARTIP_UDP_PORT",
     "HARTIP_TCP_PORT",
@@ -99,13 +114,21 @@ __all__ = [
     "DEFAULT_INACTIVITY_TIMER",
     # Device / parsing
     "DeviceInfo",
+    "DeviceVariable",
     "Variable",
+    "is_comm_error",
+    "decode_comm_error_flags",
     "parse_cmd0",
     "parse_cmd1",
     "parse_cmd2",
     "parse_cmd3",
+    "parse_cmd9",
+    "parse_cmd12",
     "parse_cmd13",
+    "parse_cmd14",
+    "parse_cmd15",
     "parse_cmd20",
+    "parse_cmd48",
     # ASCII
     "pack_ascii",
     "unpack_ascii",
@@ -122,5 +145,6 @@ __all__ = [
     "HARTIPStatusError",
     "HARTProtocolError",
     "HARTChecksumError",
+    "HARTCommunicationError",
     "HARTResponseError",
 ]

@@ -61,6 +61,7 @@ HARTIPHeader = Struct(
 #     0x01 / 0x81 = burst (short / long)
 #
 #   After the address:
+#     [expansion bytes]  (0-3 bytes, count from delimiter bits 5-6)
 #     command    (1B)
 #     byte_count (1B) - length of data field only
 #     data       (byte_count bytes)
@@ -85,6 +86,9 @@ HARTPdu = Struct(
 Address length is automatically determined from the delimiter:
 - ``0x02`` / ``0x01``: 1-byte short address
 - ``0x82`` / ``0x81``: 5-byte long (unique) address
+
+Note: This construct does not handle preambles or expansion bytes.
+Use :func:`parse_pdu` for robust parsing that handles both.
 """
 
 
@@ -117,11 +121,111 @@ def build_pdu(
 
     Returns:
         Complete PDU bytes including checksum.
+
+    Raises:
+        ValueError: If data length exceeds 255 bytes (byte_count is uint8).
     """
+    if len(data) > 255:
+        raise ValueError(
+            f"PDU data length {len(data)} exceeds maximum of 255 bytes"
+        )
     byte_count = len(data)
     frame_no_cksum = bytes([delimiter]) + address + bytes([command, byte_count]) + data
     checksum = xor_checksum(frame_no_cksum)
     return frame_no_cksum + bytes([checksum])
+
+
+def parse_pdu(data: bytes) -> object:
+    """Parse a HART PDU frame, handling preambles and expansion bytes.
+
+    This function:
+    1. Skips any leading 0xFF preamble bytes
+    2. Parses the delimiter to determine address length
+    3. Extracts expansion bytes (delimiter bits 5-6 encode count)
+    4. Parses command, byte_count, data, and checksum
+
+    Args:
+        data: Raw PDU bytes, possibly prefixed with preamble bytes.
+
+    Returns:
+        A construct Container with fields: delimiter, address, command,
+        byte_count, data, checksum, preamble_count, expansion_bytes.
+
+    Raises:
+        ValueError: If the data is too short or malformed.
+    """
+    offset = 0
+    length = len(data)
+
+    # 1. Skip preamble bytes (0xFF)
+    preamble_count = 0
+    while offset < length and data[offset] == 0xFF:
+        preamble_count += 1
+        offset += 1
+
+    if offset >= length:
+        raise ValueError("PDU contains only preamble bytes")
+
+    # 2. Parse delimiter
+    delimiter = data[offset]
+    offset += 1
+
+    # 3. Parse address (determined by bit 7 of delimiter)
+    is_long = bool(delimiter & 0x80)
+    addr_len = 5 if is_long else 1
+    if offset + addr_len > length:
+        raise ValueError(
+            f"PDU too short for {'long' if is_long else 'short'} address: "
+            f"need {addr_len} bytes at offset {offset}, have {length - offset}"
+        )
+    address = data[offset : offset + addr_len]
+    offset += addr_len
+
+    # 4. Parse expansion bytes (delimiter bits 5-6)
+    expansion_count = (delimiter >> 5) & 0x03
+    expansion_bytes = b""
+    if expansion_count > 0:
+        if offset + expansion_count > length:
+            raise ValueError(
+                f"PDU too short for {expansion_count} expansion bytes"
+            )
+        expansion_bytes = data[offset : offset + expansion_count]
+        offset += expansion_count
+
+    # 5. Parse command, byte_count, data, checksum
+    if offset + 2 > length:
+        raise ValueError("PDU too short for command and byte_count fields")
+
+    command = data[offset]
+    offset += 1
+    byte_count = data[offset]
+    offset += 1
+
+    if offset + byte_count > length:
+        raise ValueError(
+            f"PDU byte_count={byte_count} but only {length - offset} bytes remain"
+        )
+    pdu_data = data[offset : offset + byte_count]
+    offset += byte_count
+
+    checksum = 0
+    if offset < length:
+        checksum = data[offset]
+
+    # Build a simple namespace object matching the HARTPdu construct interface
+    class _PduContainer:
+        pass
+
+    result = _PduContainer()
+    result.delimiter = delimiter
+    result.address = address
+    result.command = command
+    result.byte_count = byte_count
+    result.data = pdu_data
+    result.checksum = checksum
+    result.preamble_count = preamble_count
+    result.expansion_bytes = expansion_bytes
+    return result
 
 
 def build_session_init(
@@ -237,14 +341,16 @@ def build_request(
 def parse_response(data: bytes) -> dict:
     """Parse a complete HART-IP response (header + PDU).
 
+    Handles preamble bytes and expansion bytes in the PDU payload.
+
     Args:
         data: Raw response bytes (at least 8 bytes).
 
     Returns:
-        Dict with keys ``header`` and ``pdu`` (construct Containers).
+        Dict with keys ``header`` and ``pdu`` (construct-like containers).
 
     Raises:
-        ValueError: If data is too short.
+        ValueError: If data is too short or payload is truncated.
     """
     if len(data) < HARTIP_HEADER_SIZE:
         raise ValueError(f"HART-IP response too short: {len(data)} bytes")
@@ -253,6 +359,12 @@ def parse_response(data: bytes) -> dict:
 
     pdu = None
     if header.payload_len > 0:
-        pdu = HARTPdu.parse(data[HARTIP_HEADER_SIZE:])
+        payload_data = data[HARTIP_HEADER_SIZE:]
+        if len(payload_data) < header.payload_len:
+            raise ValueError(
+                f"HART-IP payload truncated: header claims {header.payload_len} bytes, "
+                f"got {len(payload_data)}"
+            )
+        pdu = parse_pdu(payload_data)
 
     return {"header": header, "pdu": pdu}

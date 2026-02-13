@@ -61,3 +61,31 @@ class HARTResponseError(HARTProtocolError):
         super().__init__(message)
         self.code = code
         self.command = command
+
+
+class HARTCommunicationError(HARTProtocolError):
+    """HART communication error detected (bit 7 set in response code byte).
+
+    The error_flags byte encodes:
+        Bit 6: Vertical parity error
+        Bit 5: Overrun error
+        Bit 4: Framing error
+        Bit 3: Longitudinal parity error
+        Bit 1: Buffer overflow
+    """
+
+    def __init__(self, flags: int):
+        parts = []
+        if flags & 0x40:
+            parts.append("vertical_parity")
+        if flags & 0x20:
+            parts.append("overrun")
+        if flags & 0x10:
+            parts.append("framing")
+        if flags & 0x08:
+            parts.append("longitudinal_parity")
+        if flags & 0x02:
+            parts.append("buffer_overflow")
+        desc = ", ".join(parts) if parts else "unknown"
+        super().__init__(f"Communication error: {desc} (flags=0x{flags:02X})")
+        self.flags = flags
