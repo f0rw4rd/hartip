@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: no-ai-coauthor
+        name: Block AI co-author lines
+        entry: .githooks/no-ai-coauthor
+        language: script
+        stages: [commit-msg]

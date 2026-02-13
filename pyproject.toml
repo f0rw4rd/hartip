@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hartip-py"
+version = "0.1.0"
+description = "HART-IP protocol library for Python"
+readme = "README.md"
+license = "GPL-3.0-only"
+requires-python = ">=3.10"
+authors = [
+    {name = "f0rw4rd"},
+]
+maintainers = [
+    {name = "f0rw4rd"},
+]
+keywords = [
+    "hart",
+    "hart-ip",
+    "industrial",
+    "ics",
+    "ot",
+    "scada",
+    "process-control",
+    "fieldcomm",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Networking",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
+dependencies = [
+    "construct>=2.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/f0rw4rd/hartip"
+Repository = "https://github.com/f0rw4rd/hartip"
+Issues = "https://github.com/f0rw4rd/hartip/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hartip*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4", "UP"]
+ignore = ["E501", "E402", "UP006", "UP007", "UP035", "UP038", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
