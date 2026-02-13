@@ -11,14 +11,14 @@ All multi-byte integers are big-endian as per the HART specification.
 
 from __future__ import annotations
 
+import struct as _struct
+
 from construct import (
     Bytes,
-    Checksum,
     Computed,
     IfThenElse,
     Int8ub,
     Int16ub,
-    RawCopy,
     Struct,
     this,
 )
@@ -31,7 +31,7 @@ from .constants import HARTIP_HEADER_SIZE
 #   Offset  Size  Field
 #   0       1     version      (always 1 for plaintext)
 #   1       1     msg_type     (0=request, 1=response, 2=publish, 15=NAK)
-#   2       1     msg_id       (transaction identifier)
+#   2       1     msg_id       (message ID: 0=session init, 3=HART PDU)
 #   3       1     status       (0=success, see HARTIPStatus)
 #   4       2     sequence     (big-endian sequence number)
 #   6       2     byte_count   (total message length including this header)
@@ -124,8 +124,76 @@ def build_pdu(
     return frame_no_cksum + bytes([checksum])
 
 
+def build_session_init(
+    sequence: int,
+    *,
+    master_type: int = 1,
+    inactivity_timer: int = 30000,
+    version: int = 1,
+) -> bytes:
+    """Build a HART-IP Session Initiate request.
+
+    Args:
+        sequence: Sequence number.
+        master_type: 1=primary master, 0=secondary master.
+        inactivity_timer: Inactivity close timer in milliseconds.
+        version: HART-IP version (default 1).
+
+    Returns:
+        Complete Session Initiate message bytes.
+    """
+    from .constants import HARTIPMessageID, HARTIPMessageType
+
+    payload = _struct.pack(">BI", master_type, inactivity_timer)
+    total_len = HARTIP_HEADER_SIZE + len(payload)
+    header = HARTIPHeader.build(
+        dict(
+            version=version,
+            msg_type=HARTIPMessageType.REQUEST,
+            msg_id=HARTIPMessageID.SESSION_INITIATE,
+            status=0,
+            sequence=sequence & 0xFFFF,
+            byte_count=total_len,
+        )
+    )
+    return header + payload
+
+
+def build_session_close(sequence: int, *, version: int = 1) -> bytes:
+    """Build a HART-IP Session Close request."""
+    from .constants import HARTIPMessageID, HARTIPMessageType
+
+    header = HARTIPHeader.build(
+        dict(
+            version=version,
+            msg_type=HARTIPMessageType.REQUEST,
+            msg_id=HARTIPMessageID.SESSION_CLOSE,
+            status=0,
+            sequence=sequence & 0xFFFF,
+            byte_count=HARTIP_HEADER_SIZE,
+        )
+    )
+    return header
+
+
+def build_keep_alive(sequence: int, *, version: int = 1) -> bytes:
+    """Build a HART-IP Keep Alive request."""
+    from .constants import HARTIPMessageID, HARTIPMessageType
+
+    header = HARTIPHeader.build(
+        dict(
+            version=version,
+            msg_type=HARTIPMessageType.REQUEST,
+            msg_id=HARTIPMessageID.KEEP_ALIVE,
+            status=0,
+            sequence=sequence & 0xFFFF,
+            byte_count=HARTIP_HEADER_SIZE,
+        )
+    )
+    return header
+
+
 def build_request(
-    msg_id: int,
     sequence: int,
     delimiter: int,
     address: bytes,
@@ -134,10 +202,11 @@ def build_request(
     *,
     version: int = 1,
 ) -> bytes:
-    """Build a complete HART-IP request frame (header + PDU).
+    """Build a complete HART-IP pass-through request (header + PDU).
+
+    The ``msg_id`` is always set to 3 (HART_PDU / token-passing pass-through).
 
     Args:
-        msg_id: Transaction identifier (0-255).
         sequence: Sequence number (0-65535).
         delimiter: PDU frame type.
         address: 1-byte or 5-byte address.
@@ -148,7 +217,7 @@ def build_request(
     Returns:
         Complete HART-IP message bytes.
     """
-    from .constants import HARTIPMessageType
+    from .constants import HARTIPMessageID, HARTIPMessageType
 
     pdu = build_pdu(delimiter, address, command, data)
     total_len = HARTIP_HEADER_SIZE + len(pdu)
@@ -156,7 +225,7 @@ def build_request(
         dict(
             version=version,
             msg_type=HARTIPMessageType.REQUEST,
-            msg_id=msg_id & 0xFF,
+            msg_id=HARTIPMessageID.HART_PDU,
             status=0,
             sequence=sequence & 0xFFFF,
             byte_count=total_len,

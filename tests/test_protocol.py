@@ -96,7 +96,6 @@ class TestBuildPdu:
 class TestBuildRequest:
     def test_builds_valid_frame(self) -> None:
         frame = build_request(
-            msg_id=1,
             sequence=1,
             delimiter=HARTFrameType.SHORT_FRAME,
             address=b"\x00",
@@ -107,6 +106,8 @@ class TestBuildRequest:
         assert frame[0] == 1
         # Header msg_type = REQUEST
         assert frame[1] == 0
+        # Header msg_id = HART_PDU (3)
+        assert frame[2] == 3
         # byte_count should be total length
         byte_count = (frame[6] << 8) | frame[7]
         assert byte_count == len(frame)

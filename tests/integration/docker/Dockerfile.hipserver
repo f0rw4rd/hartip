@@ -1,0 +1,74 @@
+# FieldComm HART-IP Developer Kit (hipserver + hipflowapp)
+# Official implementation from FieldComm Group
+# https://github.com/FieldCommGroup/hipflowapp
+
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    g++ \
+    git \
+    libssl-dev \
+    libjsoncpp-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone hipflowapp (without submodules - we'll use main hipserver)
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/FieldCommGroup/hipflowapp.git
+
+# Clone main hipserver repo (has factory_reset.o and full Server files)
+RUN git clone --depth 1 https://github.com/FieldCommGroup/hipserver.git
+
+# Remove submodule placeholder and replace with full hipserver
+RUN rm -rf /src/hipflowapp/hipflowapp/Hip_Native/hipserver && \
+    cp -r /src/hipserver /src/hipflowapp/hipflowapp/Hip_Native/hipserver
+
+# Build hipserver first
+WORKDIR /src/hipflowapp/hipflowapp/Hip_Native/hipserver/hipserver/Server
+RUN make clean 2>/dev/null || true && make
+
+# Build hipflowapp
+WORKDIR /src/hipflowapp/hipflowapp/Hip_Native
+RUN make clean 2>/dev/null || true && make
+
+# Runtime image
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    libjsoncpp25 \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy binaries from builder
+COPY --from=builder /src/hipflowapp/hipflowapp/Hip_Native/hipserver/hipserver/Server/hipserver /app/
+COPY --from=builder /src/hipflowapp/hipflowapp/Hip_Native/hipflowapp /app/
+
+# Create startup script
+RUN echo '#!/bin/bash\n\
+echo "========================================"\n\
+echo "HART-IP Server (FieldComm hipserver)"\n\
+echo "  UDP Port: ${HART_UDP_PORT:-5094}"\n\
+echo "  TCP Port: $((${HART_UDP_PORT:-5094} + 1))"\n\
+echo "========================================"\n\
+exec /app/hipserver -p ${HART_UDP_PORT:-5094} /app/hipflowapp\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Expose HART-IP ports
+EXPOSE 5094/udp
+EXPOSE 5095/tcp
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s \
+    CMD nc -zu localhost ${HART_UDP_PORT:-5094} || exit 1
+
+CMD ["/app/start.sh"]

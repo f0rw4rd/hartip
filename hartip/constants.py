@@ -27,6 +27,26 @@ class HARTIPMessageType(IntEnum):
     NAK = 15
 
 
+class HARTIPMessageID(IntEnum):
+    """HART-IP message ID (TP10300 Section 6.4).
+
+    Identifies the purpose of the message within the session.
+    """
+
+    SESSION_INITIATE = 0
+    SESSION_CLOSE = 1
+    KEEP_ALIVE = 2
+    HART_PDU = 3  # Token-passing PDU (pass-through)
+
+
+# Session Initiate master type codes
+MASTER_TYPE_PRIMARY = 1
+MASTER_TYPE_SECONDARY = 0
+
+# Default inactivity close timer (milliseconds)
+DEFAULT_INACTIVITY_TIMER = 30000
+
+
 class HARTIPStatus(IntEnum):
     """HART-IP status codes (TP10300 Section 6.3)."""
 
@@ -44,10 +64,15 @@ class HARTIPStatus(IntEnum):
 class HARTFrameType(IntEnum):
     """HART PDU frame delimiter types."""
 
+    # Master → Slave (STX)
     SHORT_FRAME = 0x02  # 1-byte polling address
     LONG_FRAME = 0x82  # 5-byte unique address
-    BURST_SHORT = 0x01  # Burst mode (short)
-    BURST_LONG = 0x81  # Burst mode (long)
+    # Slave → Master (ACK)
+    ACK_SHORT = 0x06  # 1-byte polling address
+    ACK_LONG = 0x86  # 5-byte unique address
+    # Burst mode
+    BURST_SHORT = 0x01  # Burst (short)
+    BURST_LONG = 0x81  # Burst (long)
 
 
 class HARTCommand(IntEnum):
@@ -151,9 +176,9 @@ class HARTDeviceStatus(IntEnum):
     DEVICE_MALFUNCTION = 0x80
 
 
-# HART-IP default ports
+# HART-IP default ports (TP10300 specifies port 5094 for both UDP and TCP)
 HARTIP_UDP_PORT = 5094
-HARTIP_TCP_PORT = 5095
+HARTIP_TCP_PORT = 5094
 
 # HART-IP header size (bytes)
 HARTIP_HEADER_SIZE = 8

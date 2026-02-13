@@ -17,12 +17,16 @@ Quickstart::
 from .ascii import pack_ascii, unpack_ascii
 from .client import HARTIPClient, HARTIPResponse
 from .constants import (
+    DEFAULT_INACTIVITY_TIMER,
     HARTIP_HEADER_SIZE,
     HARTIP_TCP_PORT,
     HARTIP_UDP_PORT,
+    MASTER_TYPE_PRIMARY,
+    MASTER_TYPE_SECONDARY,
     HARTCommand,
     HARTDeviceStatus,
     HARTFrameType,
+    HARTIPMessageID,
     HARTIPMessageType,
     HARTIPStatus,
     HARTIPVersion,
@@ -51,8 +55,11 @@ from .exceptions import (
 from .protocol import (
     HARTIPHeader,
     HARTPdu,
+    build_keep_alive,
     build_pdu,
     build_request,
+    build_session_close,
+    build_session_init,
     parse_response,
     xor_checksum,
 )
@@ -68,12 +75,16 @@ __all__ = [
     # Protocol structs
     "HARTIPHeader",
     "HARTPdu",
+    "build_keep_alive",
     "build_pdu",
     "build_request",
+    "build_session_close",
+    "build_session_init",
     "parse_response",
     "xor_checksum",
     # Constants / enums
     "HARTIPVersion",
+    "HARTIPMessageID",
     "HARTIPMessageType",
     "HARTIPStatus",
     "HARTFrameType",
@@ -83,6 +94,9 @@ __all__ = [
     "HARTIP_HEADER_SIZE",
     "HARTIP_UDP_PORT",
     "HARTIP_TCP_PORT",
+    "MASTER_TYPE_PRIMARY",
+    "MASTER_TYPE_SECONDARY",
+    "DEFAULT_INACTIVITY_TIMER",
     # Device / parsing
     "DeviceInfo",
     "Variable",

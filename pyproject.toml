@@ -83,3 +83,7 @@ ignore = ["E501", "E402", "UP006", "UP007", "UP035", "UP038", "UP045"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+addopts = "-m 'not integration'"
+markers = [
+    "integration: Integration tests requiring Docker hipserver (deselected by default)",
+]

@@ -1,0 +1,19 @@
+services:
+  hart-device:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.hipserver
+    container_name: hartip-test-device
+    hostname: hart-device
+    ports:
+      - "5094:5094/udp"   # HART-IP UDP
+      - "5094:5094/tcp"   # HART-IP TCP (same port per TP10300)
+    environment:
+      - TZ=UTC
+      - HART_UDP_PORT=5094
+    healthcheck:
+      test: ["CMD", "nc", "-zu", "localhost", "5094"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

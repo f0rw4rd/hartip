@@ -73,64 +73,56 @@ class DeviceInfo:
 def parse_cmd0(payload: bytes) -> DeviceInfo:
     """Parse Command 0 (Read Unique Identifier) response payload.
 
-    Expected format (≥12 bytes after response-code + device-status):
-        Byte 0:    Expansion code (254 = HART 6/7 extended)
-        Byte 1-2:  Manufacturer ID (expanded) **or** Byte 1 only
-        ...layout depends on expansion code...
-        Last 3:    Device ID (24-bit unique serial)
+    Standard layout (≥12 bytes after response-code + device-status)::
 
-    The exact layout varies by HART revision.  We handle both
-    the legacy (HART 5) and expanded (HART 6/7) formats.
+        Byte 0:    Expansion code (254 for HART 7, informational)
+        Byte 1:    Manufacturer ID (8-bit)
+        Byte 2:    Device Type Code
+        Byte 3:    Minimum Number of Request Preambles
+        Byte 4:    Universal Command Revision Level (HART revision)
+        Byte 5:    Transmitter-Specific Command Revision Level
+        Byte 6:    Software Revision Level
+        Byte 7:    Hardware Revision / Physical Signaling Code
+        Byte 8:    Flags
+        Bytes 9-11: Device ID (24-bit)
+
+    Extended fields (HART 6/7, payload > 12 bytes):
+        Byte 12+:  num_response_preambles, max_device_vars,
+                   config_change_counter (2B), extended_field_device_status
     """
     if len(payload) < 12:
         return DeviceInfo()
 
-    expansion = payload[0]
-    if expansion == 254 and len(payload) >= 16:
-        # HART 6/7 expanded response
-        manufacturer_id = (payload[1] << 8) | payload[2]
-        device_type = payload[3]
-        num_preambles = payload[4]
-        hart_revision = payload[5]
-        software_revision = payload[6]
-        hardware_revision = payload[7]
-        physical_signaling = payload[8]
-        flags = payload[9]
-        device_id = (payload[10] << 16) | (payload[11] << 8) | payload[12]
-        num_response_preambles = payload[13] if len(payload) > 13 else 5
-        config_change_counter = (
-            struct.unpack(">H", payload[14:16])[0] if len(payload) >= 16 else 0
-        )
-        extended_status = payload[16] if len(payload) > 16 else 0
-    else:
-        # Legacy HART 5 response
-        manufacturer_id = payload[1]
-        device_type = payload[2]
-        num_preambles = payload[3]
-        hart_revision = payload[4]
-        software_revision = payload[5]
-        hardware_revision = payload[6]
-        physical_signaling = payload[7]
-        flags = payload[8]
-        device_id = (payload[9] << 16) | (payload[10] << 8) | payload[11]
-        num_response_preambles = 5
-        config_change_counter = 0
-        extended_status = 0
+    manufacturer_id = payload[1]
+    device_type = payload[2]
+    num_preambles = payload[3]
+    hart_revision = payload[4]
+    device_revision = payload[5]
+    software_revision = payload[6]
+    hardware_revision = (payload[7] >> 3) & 0x1F
+    physical_signaling = payload[7] & 0x07
+    flags = payload[8]
+    device_id = (payload[9] << 16) | (payload[10] << 8) | payload[11]
 
-    # Build 5-byte unique address
+    # Extended fields present in HART 6/7 responses
+    num_response_preambles = payload[12] if len(payload) > 12 else 5
+    config_change_counter = 0
+    extended_status = 0
+    if len(payload) >= 16:
+        config_change_counter = struct.unpack(">H", payload[14:16])[0]
+    if len(payload) > 16:
+        extended_status = payload[16]
+
+    # Build 5-byte unique address for long-frame addressing
     unique_address = bytes(
         [
-            0x80 | ((manufacturer_id >> 8) & 0x3F),
-            manufacturer_id & 0xFF,
+            0x80 | (manufacturer_id & 0x3F),
             device_type,
             (device_id >> 16) & 0xFF,
             (device_id >> 8) & 0xFF,
             device_id & 0xFF,
         ]
     )
-    # Actually unique address is 5 bytes: [mfr_hi|0x80, mfr_lo, dev_type, id_hi, id_mid, id_lo]
-    # But HART defines it as 5 bytes for long-frame addressing, so trim:
-    unique_address = unique_address[:5]
 
     return DeviceInfo(
         manufacturer_id=manufacturer_id,

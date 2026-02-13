@@ -2,9 +2,11 @@
 HART-IP client for TCP and UDP communication.
 
 Provides a synchronous client that handles:
+- Session management (initiate / close / keep-alive)
+- HART PDU pass-through (msg_id=3)
 - TCP and UDP socket management
 - HART-IP frame encoding/decoding (using construct structs)
-- Transaction ID and sequence management
+- Sequence number management
 - Response parsing with checksum validation
 """
 
@@ -15,16 +17,18 @@ import threading
 from typing import Optional
 
 from .constants import (
+    DEFAULT_INACTIVITY_TIMER,
     HARTIP_HEADER_SIZE,
     HARTIP_TCP_PORT,
     HARTIP_UDP_PORT,
+    MASTER_TYPE_PRIMARY,
     HARTCommand,
     HARTFrameType,
+    HARTIPMessageID,
     HARTIPMessageType,
     HARTIPStatus,
     HARTResponseCode,
 )
-from .device import DeviceInfo, Variable, parse_cmd0, parse_cmd1, parse_cmd2, parse_cmd3
 from .exceptions import (
     HARTChecksumError,
     HARTIPConnectionError,
@@ -32,7 +36,16 @@ from .exceptions import (
     HARTIPTimeoutError,
     HARTProtocolError,
 )
-from .protocol import HARTIPHeader, HARTPdu, build_request, parse_response, xor_checksum
+from .protocol import (
+    HARTIPHeader,
+    HARTPdu,
+    build_keep_alive,
+    build_request,
+    build_session_close,
+    build_session_init,
+    parse_response,
+    xor_checksum,
+)
 
 
 class HARTIPResponse:
@@ -69,10 +82,15 @@ class HARTIPResponse:
 class HARTIPClient:
     """Synchronous HART-IP client over TCP or UDP.
 
+    A HART-IP session is established automatically on :meth:`connect`
+    and torn down on :meth:`close`.
+
     Usage::
 
+        from hartip import HARTIPClient, parse_cmd0
+
         with HARTIPClient("192.168.1.100") as client:
-            resp = client.send_command(HARTCommand.READ_UNIQUE_ID)
+            resp = client.read_unique_id()
             info = parse_cmd0(resp.payload)
     """
 
@@ -82,25 +100,29 @@ class HARTIPClient:
         port: Optional[int] = None,
         protocol: str = "udp",
         timeout: float = 5.0,
+        master_type: int = MASTER_TYPE_PRIMARY,
+        inactivity_timer: int = DEFAULT_INACTIVITY_TIMER,
     ):
         self.host = host
         self.protocol = protocol.lower()
         self.port = port or (HARTIP_TCP_PORT if self.protocol == "tcp" else HARTIP_UDP_PORT)
         self.timeout = timeout
+        self.master_type = master_type
+        self.inactivity_timer = inactivity_timer
 
         self._socket: Optional[socket.socket] = None
         self._connected = False
-        self._msg_id = 0
+        self._session_active = False
         self._sequence = 0
         self._lock = threading.Lock()
 
     # -- connection lifecycle ------------------------------------------------
 
     def connect(self) -> None:
-        """Open the transport connection.
+        """Open the transport connection and initiate a HART-IP session.
 
         Raises:
-            HARTIPConnectionError: On socket failure.
+            HARTIPConnectionError: On socket or session failure.
         """
         try:
             if self.protocol == "tcp":
@@ -115,8 +137,43 @@ class HARTIPClient:
             self._connected = False
             raise HARTIPConnectionError(f"Failed to connect to {self.host}:{self.port}: {exc}")
 
+        # Initiate HART-IP session
+        self._initiate_session()
+
+    def _initiate_session(self) -> None:
+        """Send Session Initiate (msg_id=0) and validate the response."""
+        frame = build_session_init(
+            sequence=self._next_sequence(),
+            master_type=self.master_type,
+            inactivity_timer=self.inactivity_timer,
+        )
+        raw = self._send_recv(frame)
+        header = HARTIPHeader.parse(raw[:HARTIP_HEADER_SIZE])
+
+        if header.status != HARTIPStatus.SUCCESS:
+            try:
+                name = HARTIPStatus(header.status).name
+            except ValueError:
+                name = f"status {header.status}"
+            self.close()
+            raise HARTIPConnectionError(f"Session initiate failed: {name}")
+
+        self._session_active = True
+
+    def _close_session(self) -> None:
+        """Send Session Close (msg_id=1) if session is active."""
+        if not self._session_active or not self._socket:
+            return
+        try:
+            frame = build_session_close(sequence=self._next_sequence())
+            self._send_recv(frame)
+        except (OSError, HARTIPTimeoutError):
+            pass  # best-effort
+        self._session_active = False
+
     def close(self) -> None:
-        """Close the transport connection."""
+        """Close the HART-IP session and transport connection."""
+        self._close_session()
         if self._socket:
             try:
                 self._socket.close()
@@ -129,6 +186,10 @@ class HARTIPClient:
     def connected(self) -> bool:
         return self._connected
 
+    @property
+    def session_active(self) -> bool:
+        return self._session_active
+
     def __enter__(self) -> HARTIPClient:
         self.connect()
         return self
@@ -136,12 +197,7 @@ class HARTIPClient:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    # -- ID generators -------------------------------------------------------
-
-    def _next_msg_id(self) -> int:
-        with self._lock:
-            self._msg_id = (self._msg_id + 1) & 0xFF
-            return self._msg_id
+    # -- sequence generator --------------------------------------------------
 
     def _next_sequence(self) -> int:
         with self._lock:
@@ -149,6 +205,21 @@ class HARTIPClient:
             return self._sequence
 
     # -- send / receive ------------------------------------------------------
+
+    def _send_recv(self, frame: bytes) -> bytes:
+        """Send a frame and receive the response."""
+        try:
+            if self.protocol == "tcp":
+                self._socket.sendall(frame)
+                return self._recv_tcp()
+            else:
+                self._socket.sendto(frame, (self.host, self.port))
+                raw, _ = self._socket.recvfrom(1024)
+                return raw
+        except TimeoutError as exc:
+            raise HARTIPTimeoutError("Operation timed out") from exc
+        except OSError as exc:
+            raise HARTIPConnectionError(f"Communication error: {exc}") from exc
 
     def send_command(
         self,
@@ -159,6 +230,8 @@ class HARTIPClient:
         unique_addr: Optional[bytes] = None,
     ) -> HARTIPResponse:
         """Send a HART command and receive the response.
+
+        The command is wrapped in a HART-IP pass-through frame (msg_id=3).
 
         Args:
             command: HART command number.
@@ -171,13 +244,15 @@ class HARTIPClient:
             Parsed :class:`HARTIPResponse`.
 
         Raises:
-            HARTIPConnectionError: Not connected.
+            HARTIPConnectionError: Not connected or no active session.
             HARTIPTimeoutError: No response within timeout.
             HARTIPStatusError: HART-IP header status != 0.
             HARTChecksumError: PDU checksum invalid.
         """
         if not self._connected or not self._socket:
             raise HARTIPConnectionError("Not connected")
+        if not self._session_active:
+            raise HARTIPConnectionError("No active session (call connect() first)")
 
         if use_long_frame and unique_addr:
             delimiter = HARTFrameType.LONG_FRAME
@@ -187,7 +262,6 @@ class HARTIPClient:
             addr_bytes = bytes([address & 0x0F])
 
         frame = build_request(
-            msg_id=self._next_msg_id(),
             sequence=self._next_sequence(),
             delimiter=delimiter,
             address=addr_bytes,
@@ -195,18 +269,7 @@ class HARTIPClient:
             data=data,
         )
 
-        try:
-            if self.protocol == "tcp":
-                self._socket.sendall(frame)
-                raw = self._recv_tcp()
-            else:
-                self._socket.sendto(frame, (self.host, self.port))
-                raw, _ = self._socket.recvfrom(1024)
-        except TimeoutError as exc:
-            raise HARTIPTimeoutError(f"Command {command} timed out") from exc
-        except OSError as exc:
-            raise HARTIPConnectionError(f"Communication error: {exc}") from exc
-
+        raw = self._send_recv(frame)
         return self._parse(raw)
 
     def _recv_tcp(self) -> bytes:
@@ -249,7 +312,7 @@ class HARTIPClient:
 
         # Validate checksum
         pdu_bytes = data[HARTIP_HEADER_SIZE:]
-        frame_without_cksum = pdu_bytes[: -1]
+        frame_without_cksum = pdu_bytes[:-1]
         expected = xor_checksum(frame_without_cksum)
         if expected != pdu.checksum:
             raise HARTChecksumError(expected, pdu.checksum)
