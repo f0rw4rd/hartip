@@ -38,12 +38,24 @@ from hartip.device import (
     parse_cmd1,
     parse_cmd2,
     parse_cmd3,
+    parse_cmd6,
+    parse_cmd7,
+    parse_cmd8,
     parse_cmd9,
+    parse_cmd11,
     parse_cmd12,
     parse_cmd13,
     parse_cmd14,
     parse_cmd15,
+    parse_cmd16,
+    parse_cmd17,
+    parse_cmd18,
+    parse_cmd19,
     parse_cmd20,
+    parse_cmd21,
+    parse_cmd22,
+    parse_cmd33,
+    parse_cmd38,
     parse_cmd48,
 )
 from hartip.exceptions import (
@@ -1624,3 +1636,192 @@ class TestRecvTcpEdges:
         client = HARTIPClient("127.0.0.1", protocol="tcp")
         result = client._recv_exact(0)
         assert result == b""
+
+
+# ---------------------------------------------------------------------------
+# New parsers: cmd6/7, cmd8, cmd11, cmd16, cmd17, cmd18, cmd19, cmd21, cmd22,
+#              cmd33, cmd38 — derived from Wireshark packet-hartip.c dissectors
+# ---------------------------------------------------------------------------
+
+
+class TestParseCmd7Edges:
+    """Command 7 (Read Loop Configuration) / Command 6 alias."""
+
+    def test_valid_response(self):
+        payload = bytes([5, 0])  # poll_addr=5, loop_current_mode=enabled
+        result = parse_cmd7(payload)
+        assert result["polling_address"] == 5
+        assert result["loop_current_mode"] == 0
+
+    def test_disabled_loop_current(self):
+        result = parse_cmd7(bytes([0, 1]))
+        assert result["loop_current_mode"] == 1
+
+    def test_too_short(self):
+        assert parse_cmd7(b"\x00") == {}
+        assert parse_cmd7(b"") == {}
+
+    def test_cmd6_is_alias(self):
+        assert parse_cmd6 is parse_cmd7
+
+    def test_extra_bytes_ignored(self):
+        result = parse_cmd7(bytes([10, 0, 0xFF, 0xFF]))
+        assert result["polling_address"] == 10
+        assert result["loop_current_mode"] == 0
+
+
+class TestParseCmd8Edges:
+    """Command 8 (Read Dynamic Variable Classifications)."""
+
+    def test_valid_response(self):
+        payload = bytes([64, 65, 66, 0])  # classified, classified, classified, unclassified
+        result = parse_cmd8(payload)
+        assert result["pv_classification"] == 64
+        assert result["sv_classification"] == 65
+        assert result["tv_classification"] == 66
+        assert result["qv_classification"] == 0
+
+    def test_too_short(self):
+        assert parse_cmd8(bytes([1, 2, 3])) == {}
+        assert parse_cmd8(b"") == {}
+
+    def test_all_unclassified(self):
+        result = parse_cmd8(bytes([0, 0, 0, 0]))
+        assert all(v == 0 for v in result.values())
+
+    def test_extra_bytes_ignored(self):
+        result = parse_cmd8(bytes([1, 2, 3, 4, 0xFF]))
+        assert result["qv_classification"] == 4
+
+
+class TestParseCmd11Alias:
+    """Command 11 (Read Unique ID by Tag) — same response as Command 0."""
+
+    def test_is_cmd0(self):
+        assert parse_cmd11 is parse_cmd0
+
+    def test_parses_same_as_cmd0(self):
+        payload = bytes([
+            0xFE, 0x26, 0x01, 5, 7, 3, 2, 0x28, 0x00,
+            0x00, 0x01, 0x00,
+        ])
+        info_0 = parse_cmd0(payload)
+        info_11 = parse_cmd11(payload)
+        assert info_0.manufacturer_id == info_11.manufacturer_id
+        assert info_0.device_id == info_11.device_id
+
+
+class TestParseCmd16Edges:
+    """Command 16 (Read Final Assembly Number) / Command 19 alias."""
+
+    def test_valid_response(self):
+        payload = bytes([0x00, 0x01, 0x00])  # assembly number = 256
+        result = parse_cmd16(payload)
+        assert result["final_assembly_number"] == 256
+
+    def test_zero(self):
+        result = parse_cmd16(bytes([0, 0, 0]))
+        assert result["final_assembly_number"] == 0
+
+    def test_max_value(self):
+        result = parse_cmd16(bytes([0xFF, 0xFF, 0xFF]))
+        assert result["final_assembly_number"] == 0xFFFFFF
+
+    def test_too_short(self):
+        assert parse_cmd16(bytes([0, 1])) == {}
+        assert parse_cmd16(b"") == {}
+
+    def test_cmd19_is_alias(self):
+        assert parse_cmd19 is parse_cmd16
+
+
+class TestParseCmd17Alias:
+    """Command 17 (Write Message) response — same as Command 12."""
+
+    def test_is_cmd12(self):
+        assert parse_cmd17 is parse_cmd12
+
+
+class TestParseCmd18Alias:
+    """Command 18 (Write Tag/Descriptor/Date) response — same as Command 13."""
+
+    def test_is_cmd13(self):
+        assert parse_cmd18 is parse_cmd13
+
+
+class TestParseCmd21Alias:
+    """Command 21 (Read Unique ID by Long Tag) — same as Command 0."""
+
+    def test_is_cmd0(self):
+        assert parse_cmd21 is parse_cmd0
+
+
+class TestParseCmd22Alias:
+    """Command 22 (Write Long Tag) response — same as Command 20."""
+
+    def test_is_cmd20(self):
+        assert parse_cmd22 is parse_cmd20
+
+
+class TestParseCmd33Edges:
+    """Command 33 (Read Device Variables)."""
+
+    def test_single_slot(self):
+        payload = bytes([0x01, 32]) + struct.pack(">f", 25.0)
+        result = parse_cmd33(payload)
+        assert len(result["variables"]) == 1
+        v = result["variables"][0]
+        assert v.unit_code == 32
+        assert v.unit_name == "degC"
+        assert abs(v.value - 25.0) < 0.01
+
+    def test_four_slots(self):
+        payload = b""
+        for i in range(4):
+            payload += bytes([i, 39]) + struct.pack(">f", float(i * 10))
+        result = parse_cmd33(payload)
+        assert len(result["variables"]) == 4
+        assert abs(result["variables"][2].value - 20.0) < 0.01
+
+    def test_too_short(self):
+        assert parse_cmd33(bytes([0, 1, 2, 3, 4])) == {}
+        assert parse_cmd33(b"") == {}
+
+    def test_partial_slot_ignored(self):
+        """7 bytes = 1 full slot (6) + 1 partial byte."""
+        payload = bytes([0x01, 32]) + struct.pack(">f", 1.0) + b"\xFF"
+        result = parse_cmd33(payload)
+        assert len(result["variables"]) == 1
+
+    def test_labels(self):
+        payload = b""
+        for i in range(4):
+            payload += bytes([i, 0]) + struct.pack(">f", 0.0)
+        result = parse_cmd33(payload)
+        labels = [v.label for v in result["variables"]]
+        assert labels == ["Slot 0", "Slot 1", "Slot 2", "Slot 3"]
+
+
+class TestParseCmd38Edges:
+    """Command 38 (Reset Configuration Changed Flag)."""
+
+    def test_valid_response(self):
+        payload = struct.pack(">H", 42)
+        result = parse_cmd38(payload)
+        assert result["configuration_change_counter"] == 42
+
+    def test_zero_counter(self):
+        result = parse_cmd38(bytes([0, 0]))
+        assert result["configuration_change_counter"] == 0
+
+    def test_max_counter(self):
+        result = parse_cmd38(bytes([0xFF, 0xFF]))
+        assert result["configuration_change_counter"] == 65535
+
+    def test_too_short(self):
+        assert parse_cmd38(b"\x00") == {}
+        assert parse_cmd38(b"") == {}
+
+    def test_extra_bytes_ignored(self):
+        result = parse_cmd38(bytes([0, 10, 0xFF, 0xFF]))
+        assert result["configuration_change_counter"] == 10

@@ -2,8 +2,11 @@
 HART device data models and response parsing.
 
 Provides dataclasses for device information and helper functions
-to parse universal HART command responses (Commands 0, 1, 2, 3, 9, 12, 13,
-14, 15, 20, 48).
+to parse universal and common-practice HART command responses.
+
+Universal: 0, 1, 2, 3, 7, 8, 9, 12, 13, 14, 15, 16, 20, 48
+Common practice: 33, 38
+Aliases: 6→7, 11→0, 17→12, 18→13, 19→16, 21→0, 22→20
 """
 
 from __future__ import annotations
@@ -494,3 +497,132 @@ def parse_cmd48(payload: bytes) -> dict:
         result["additional_device_specific_status"] = payload[14:25]
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Additional universal command parsers (from Wireshark packet-hartip.c)
+# ---------------------------------------------------------------------------
+
+
+def parse_cmd7(payload: bytes) -> dict:
+    """Parse Command 7 (Read Loop Configuration) response.
+
+    Also used for Command 6 (Write Polling Address) response — same format.
+
+    Format (2 bytes, Wireshark dissect_cmd7)::
+
+        Byte 0: polling_address
+        Byte 1: loop_current_mode (0=enabled, 1=disabled)
+    """
+    if len(payload) < 2:
+        return {}
+    return {
+        "polling_address": payload[0],
+        "loop_current_mode": payload[1],
+    }
+
+
+# Command 6 response is identical to Command 7
+parse_cmd6 = parse_cmd7
+
+
+def parse_cmd8(payload: bytes) -> dict:
+    """Parse Command 8 (Read Dynamic Variable Classifications) response.
+
+    Format (4 bytes, Wireshark dissect_cmd8, hipflowapp cmd_08.h)::
+
+        Byte 0: primary_var_classification
+        Byte 1: secondary_var_classification
+        Byte 2: tertiary_var_classification
+        Byte 3: quaternary_var_classification
+
+    Classification codes per HCF_SPEC-183 Table 57.
+    """
+    if len(payload) < 4:
+        return {}
+    return {
+        "pv_classification": payload[0],
+        "sv_classification": payload[1],
+        "tv_classification": payload[2],
+        "qv_classification": payload[3],
+    }
+
+
+# Command 11 response is identical to Command 0 (Wireshark: case 11 → dissect_cmd0)
+parse_cmd11 = parse_cmd0
+
+
+def parse_cmd16(payload: bytes) -> dict:
+    """Parse Command 16 (Read Final Assembly Number) response.
+
+    Also used for Command 19 (Write Final Assembly Number) response.
+
+    Format (3 bytes, Wireshark dissect_cmd16, hipflowapp cmd_16.h)::
+
+        Bytes 0-2: final_assembly_number (Unsigned-24)
+    """
+    if len(payload) < 3:
+        return {}
+    assembly = (payload[0] << 16) | (payload[1] << 8) | payload[2]
+    return {"final_assembly_number": assembly}
+
+
+# Command 17 response is identical to Command 12 (Wireshark: case 17 → dissect_packAscii 24)
+parse_cmd17 = parse_cmd12
+
+# Command 18 response is identical to Command 13 (Wireshark: case 18 → dissect_cmd13)
+parse_cmd18 = parse_cmd13
+
+# Command 19 response is identical to Command 16 (Wireshark: case 19 → dissect_cmd16)
+parse_cmd19 = parse_cmd16
+
+# Command 21 response is identical to Command 0 (Wireshark: case 21 → dissect_cmd0)
+parse_cmd21 = parse_cmd0
+
+# Command 22 response is identical to Command 20 (Wireshark: case 22 → 32B ASCII tag)
+parse_cmd22 = parse_cmd20
+
+
+def parse_cmd33(payload: bytes) -> dict:
+    """Parse Command 33 (Read Device Variables) response.
+
+    Format (Wireshark dissect_cmd33, up to 4 slots of 6 bytes each)::
+
+        Per slot:
+          Byte N+0: device_var_code
+          Byte N+1: unit_code
+          Bytes N+2-5: value (IEEE 754 float)
+
+    Returns:
+        Dict with ``variables`` (list of Variable).
+    """
+    if len(payload) < 6:
+        return {}
+
+    variables: list[Variable] = []
+    labels = ["Slot 0", "Slot 1", "Slot 2", "Slot 3"]
+    offset = 0
+
+    for i, label in enumerate(labels):
+        if offset + 6 > len(payload):
+            break
+        device_var_code = payload[offset]
+        unit_code = payload[offset + 1]
+        value = Float32b.parse(payload[offset + 2 : offset + 6])
+        variables.append(Variable(value=value, unit_code=unit_code, label=label))
+        offset += 6
+
+    return {"variables": variables}
+
+
+def parse_cmd38(payload: bytes) -> dict:
+    """Parse Command 38 (Reset Configuration Changed Flag) response.
+
+    Format (2 bytes, Wireshark dissect_cmd38, hipflowapp cmd_38.h)::
+
+        Bytes 0-1: configuration_change_counter (Unsigned-16)
+    """
+    if len(payload) < 2:
+        return {}
+    counter = Int16ub.parse(payload[0:2])
+    return {"configuration_change_counter": counter}
