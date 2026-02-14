@@ -11,6 +11,7 @@ from hartip.constants import (
 from hartip.protocol import (
     HARTIPHeader,
     HARTPdu,
+    PduContainer,
     build_keep_alive,
     build_pdu,
     build_request,
@@ -300,3 +301,43 @@ class TestBuildKeepAlive:
         hdr = HARTIPHeader.parse(frame[:HARTIP_HEADER_SIZE])
         assert hdr.msg_id == HARTIPMessageID.KEEP_ALIVE
         assert hdr.sequence == 10
+
+
+# ---------------------------------------------------------------------------
+# PduContainer dataclass
+# ---------------------------------------------------------------------------
+
+
+class TestPduContainer:
+    def test_parse_pdu_returns_pdu_container(self) -> None:
+        raw = build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 0)
+        result = parse_pdu(raw)
+        assert isinstance(result, PduContainer)
+
+    def test_pdu_container_fields(self) -> None:
+        data = bytes([0x01, 0x02, 0x03])
+        raw = build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 3, data)
+        result = parse_pdu(raw)
+        assert result.delimiter == 0x02
+        assert result.address == b"\x00"
+        assert result.command == 3
+        assert result.byte_count == 3
+        assert bytes(result.data) == data
+        assert result.preamble_count == 0
+        assert result.expansion_bytes == b""
+
+    def test_pdu_container_repr(self) -> None:
+        raw = build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 0)
+        result = parse_pdu(raw)
+        r = repr(result)
+        assert "cmd=0" in r
+        assert "bc=0" in r
+        assert "0x02" in r
+
+    def test_pdu_container_is_dataclass(self) -> None:
+        from dataclasses import fields
+        f = fields(PduContainer)
+        names = [field.name for field in f]
+        assert "delimiter" in names
+        assert "command" in names
+        assert "data" in names

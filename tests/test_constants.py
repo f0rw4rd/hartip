@@ -60,14 +60,26 @@ class TestHARTIPMessageID:
 
 
 class TestHARTIPStatus:
+    """Verify HART-IP status codes per TP10300 / CISAGOV / hstypes.h."""
+
     def test_success(self) -> None:
         assert HARTIPStatus.SUCCESS == 0
 
-    def test_invalid_session(self) -> None:
-        assert HARTIPStatus.INVALID_SESSION == 5
+    def test_invalid_selection(self) -> None:
+        # hstypes.h: HARTIP_SESS_ERR_INVALID_MASTER_TYPE = 2
+        assert HARTIPStatus.ERROR_INVALID_SELECTION == 2
 
-    def test_buffer_overflow(self) -> None:
-        assert HARTIPStatus.BUFFER_OVERFLOW == 8
+    def test_too_few_data_bytes(self) -> None:
+        # hstypes.h: HARTIP_SESS_ERR_TOO_FEW_BYTES = 5
+        assert HARTIPStatus.ERROR_TOO_FEW_DATA_BYTES == 5
+
+    def test_device_specific(self) -> None:
+        # C# HARTIPConnect: "Device Specific Command Error" = 6
+        assert HARTIPStatus.ERROR_DEVICE_SPECIFIC == 6
+
+    def test_set_to_nearest_value(self) -> None:
+        # hstypes.h: HARTIP_SESS_ERR_TOO_FEW_TIME = 8 (set to nearest)
+        assert HARTIPStatus.WARNING_SET_TO_NEAREST_VALUE == 8
 
     def test_security_not_initialized(self) -> None:
         assert HARTIPStatus.ERROR_SECURITY_NOT_INITIALIZED == 9
@@ -75,8 +87,13 @@ class TestHARTIPStatus:
     def test_all_sessions_in_use(self) -> None:
         assert HARTIPStatus.ERROR_ALL_SESSIONS_IN_USE == 15
 
-    def test_access_restricted(self) -> None:
-        assert HARTIPStatus.ERROR_ACCESS_RESTRICTED == 16
+    def test_session_already_exists(self) -> None:
+        # hstypes.h: HARTIP_SESS_ERR_SESSION_EXISTS = 16
+        assert HARTIPStatus.ERROR_SESSION_ALREADY_EXISTS == 16
+
+    def test_insecure_session_exists(self) -> None:
+        # CISAGOV: WARNING_INSECURE_SESSION_ALREADY_EXISTS = 30
+        assert HARTIPStatus.WARNING_INSECURE_SESSION_EXISTS == 30
 
 
 class TestHARTFrameType:
@@ -121,18 +138,38 @@ class TestHARTCommand:
 
 
 class TestHARTResponseCode:
+    """Verify HART response codes per Spec 307 / hartdefs.h / C# HARTMessage.cs."""
+
     def test_success(self) -> None:
         assert HARTResponseCode.SUCCESS == 0
 
     def test_undefined_command(self) -> None:
         assert HARTResponseCode.UNDEFINED_COMMAND == 1
 
+    def test_access_restricted(self) -> None:
+        # hartdefs.h: RC_ACC_RESTR = 16
+        assert HARTResponseCode.ACCESS_RESTRICTED == 16
+
+    def test_response_truncated(self) -> None:
+        # hartdefs.h: RC_TRUNCATED = 30
+        assert HARTResponseCode.RESPONSE_TRUNCATED == 30
+
+    def test_device_busy(self) -> None:
+        # hartdefs.h: RC_BUSY = 32, C#: RSP_DEVICE_BUSY = 32
+        assert HARTResponseCode.DEVICE_BUSY == 32
+
+    def test_dr_initiated(self) -> None:
+        # hartdefs.h: RC_DR_INIT = 33, C#: RSP_DR_INITIATE = 33
+        assert HARTResponseCode.DR_INITIATED == 33
+
     def test_delayed_response_codes(self) -> None:
         assert HARTResponseCode.DR_RUNNING == 34
         assert HARTResponseCode.DR_DEAD == 35
         assert HARTResponseCode.DR_CONFLICT == 36
-        assert HARTResponseCode.DELAYED_RESPONSE_INITIATED == 65
-        assert HARTResponseCode.DELAYED_RESPONSE_COMPLETED == 66
+
+    def test_cmd_not_implemented(self) -> None:
+        # hartdefs.h: RC_NOT_IMPLEM = 64, C#: RSP_CMD_NOT_IMPLEMENTED = 64
+        assert HARTResponseCode.CMD_NOT_IMPLEMENTED == 64
 
 
 class TestHARTCommErrorFlags:

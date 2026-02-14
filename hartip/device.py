@@ -8,9 +8,10 @@ to parse universal HART command responses (Commands 0, 1, 2, 3, 9, 12, 13,
 
 from __future__ import annotations
 
-import struct
 from dataclasses import dataclass, field
 from typing import Optional
+
+from construct import Float32b, Int16ub
 
 from .ascii import unpack_ascii
 from .constants import COMM_ERROR_MASK, HARTCommErrorFlags
@@ -60,11 +61,13 @@ class DeviceInfo:
     unique_address: bytes = b""
     hart_revision: int = 0
     software_revision: int = 0
+    device_revision: int = 0  # Transmitter-Specific Command Revision Level
     hardware_revision: int = 0
     physical_signaling: int = 0
     flags: int = 0
     num_preambles: int = 5
     num_response_preambles: int = 5
+    max_device_vars: int = 0
     config_change_counter: int = 0
     extended_field_device_status: int = 0
 
@@ -169,10 +172,11 @@ def parse_cmd0(payload: bytes) -> DeviceInfo:
 
     # Extended fields present in HART 6/7 responses
     num_response_preambles = payload[12] if len(payload) > 12 else 5
+    max_device_vars = payload[13] if len(payload) > 13 else 0
     config_change_counter = 0
     extended_status = 0
     if len(payload) >= 16:
-        config_change_counter = struct.unpack(">H", payload[14:16])[0]
+        config_change_counter = Int16ub.parse(payload[14:16])
     if len(payload) > 16:
         extended_status = payload[16]
 
@@ -181,9 +185,9 @@ def parse_cmd0(payload: bytes) -> DeviceInfo:
     private_label = 0
     device_profile = 0
     if len(payload) >= 19:
-        manufacturer_id_16bit = struct.unpack(">H", payload[17:19])[0]
+        manufacturer_id_16bit = Int16ub.parse(payload[17:19])
     if len(payload) >= 22:
-        private_label = struct.unpack(">H", payload[19:21])[0]
+        private_label = Int16ub.parse(payload[19:21])
         device_profile = payload[21]
 
     # Build 5-byte unique address for long-frame addressing
@@ -204,12 +208,14 @@ def parse_cmd0(payload: bytes) -> DeviceInfo:
         device_id=device_id,
         unique_address=unique_address,
         hart_revision=hart_revision,
+        device_revision=device_revision,
         software_revision=software_revision,
         hardware_revision=hardware_revision,
         physical_signaling=physical_signaling,
         flags=flags,
         num_preambles=num_preambles,
         num_response_preambles=num_response_preambles,
+        max_device_vars=max_device_vars,
         config_change_counter=config_change_counter,
         extended_field_device_status=extended_status,
         manufacturer_id_16bit=manufacturer_id_16bit,
@@ -226,7 +232,7 @@ def parse_cmd1(payload: bytes) -> Optional[Variable]:
     if len(payload) < 5:
         return None
     unit_code = payload[0]
-    (value,) = struct.unpack(">f", payload[1:5])
+    value = Float32b.parse(payload[1:5])
     return Variable(value=value, unit_code=unit_code, label="PV")
 
 
@@ -237,8 +243,8 @@ def parse_cmd2(payload: bytes) -> dict:
     """
     if len(payload) < 8:
         return {}
-    (current,) = struct.unpack(">f", payload[0:4])
-    (percent,) = struct.unpack(">f", payload[4:8])
+    current = Float32b.parse(payload[0:4])
+    percent = Float32b.parse(payload[4:8])
     return {"current_mA": current, "percent_range": percent}
 
 
@@ -254,7 +260,7 @@ def parse_cmd3(payload: bytes) -> dict:
     if len(payload) < 4:
         return {}
 
-    (current,) = struct.unpack(">f", payload[0:4])
+    current = Float32b.parse(payload[0:4])
     variables: list[Variable] = []
     labels = ["PV", "SV", "TV", "QV"]
 
@@ -263,7 +269,7 @@ def parse_cmd3(payload: bytes) -> dict:
         if offset + 5 > len(payload):
             break
         unit_code = payload[offset]
-        (value,) = struct.unpack(">f", payload[offset + 1 : offset + 5])
+        value = Float32b.parse(payload[offset + 1 : offset + 5])
         variables.append(Variable(value=value, unit_code=unit_code, label=label))
         offset += 5
 
@@ -304,7 +310,7 @@ def parse_cmd9(payload: bytes) -> dict:
         device_var_code = payload[offset]
         classification = payload[offset + 1]
         unit_code = payload[offset + 2]
-        (value,) = struct.unpack(">f", payload[offset + 3 : offset + 7])
+        value = Float32b.parse(payload[offset + 3 : offset + 7])
         status = payload[offset + 7]
         variables.append(
             DeviceVariable(
@@ -379,9 +385,9 @@ def parse_cmd14(payload: bytes) -> dict:
 
     serial = (payload[0] << 16) | (payload[1] << 8) | payload[2]
     unit_code = payload[3]
-    (upper_limit,) = struct.unpack(">f", payload[4:8])
-    (lower_limit,) = struct.unpack(">f", payload[8:12])
-    (min_span,) = struct.unpack(">f", payload[12:16])
+    upper_limit = Float32b.parse(payload[4:8])
+    lower_limit = Float32b.parse(payload[8:12])
+    min_span = Float32b.parse(payload[12:16])
 
     return {
         "transducer_serial_number": serial,
@@ -414,9 +420,9 @@ def parse_cmd15(payload: bytes) -> dict:
     alarm_selection = payload[0]
     transfer_function = payload[1]
     range_units = payload[2]
-    (upper_range,) = struct.unpack(">f", payload[3:7])
-    (lower_range,) = struct.unpack(">f", payload[7:11])
-    (damping,) = struct.unpack(">f", payload[11:15])
+    upper_range = Float32b.parse(payload[3:7])
+    lower_range = Float32b.parse(payload[7:11])
+    damping = Float32b.parse(payload[11:15])
     write_protect = payload[15]
     reserved = payload[16]
     analog_channel_flags = payload[17]

@@ -1,8 +1,22 @@
 repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
   - repo: local
     hooks:
+      - id: tests
+        name: tests
+        entry: python -m pytest tests/ -x -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       - id: no-ai-coauthor
-        name: Block AI co-author lines
+        name: block AI co-author lines
         entry: .githooks/no-ai-coauthor
         language: script
+        always_run: true
         stages: [commit-msg]

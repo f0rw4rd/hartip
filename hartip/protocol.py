@@ -11,7 +11,7 @@ All multi-byte integers are big-endian as per the HART specification.
 
 from __future__ import annotations
 
-import struct as _struct
+from dataclasses import dataclass
 
 from construct import (
     Bytes,
@@ -19,11 +19,12 @@ from construct import (
     IfThenElse,
     Int8ub,
     Int16ub,
+    Int32ub,
     Struct,
     this,
 )
 
-from .constants import HARTIP_HEADER_SIZE
+from .constants import HARTIP_HEADER_SIZE, HARTIPMessageID, HARTIPMessageType
 
 # ---------------------------------------------------------------------------
 # HART-IP transport header  (8 bytes, TP10300)
@@ -95,6 +96,29 @@ Use :func:`parse_pdu` for robust parsing that handles both.
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class PduContainer:
+    """Parsed HART PDU frame (public replacement for internal construct Container).
+
+    Returned by :func:`parse_pdu` with all frame fields extracted.
+    """
+
+    delimiter: int
+    address: bytes
+    command: int
+    byte_count: int
+    data: bytes
+    checksum: int
+    preamble_count: int = 0
+    expansion_bytes: bytes = b""
+
+    def __repr__(self) -> str:
+        return (
+            f"PduContainer(cmd={self.command}, bc={self.byte_count}, "
+            f"delimiter=0x{self.delimiter:02X}, cksum=0x{self.checksum:02X})"
+        )
 
 
 def xor_checksum(data: bytes) -> int:
@@ -212,20 +236,16 @@ def parse_pdu(data: bytes) -> object:
     if offset < length:
         checksum = data[offset]
 
-    # Build a simple namespace object matching the HARTPdu construct interface
-    class _PduContainer:
-        pass
-
-    result = _PduContainer()
-    result.delimiter = delimiter
-    result.address = address
-    result.command = command
-    result.byte_count = byte_count
-    result.data = pdu_data
-    result.checksum = checksum
-    result.preamble_count = preamble_count
-    result.expansion_bytes = expansion_bytes
-    return result
+    return PduContainer(
+        delimiter=delimiter,
+        address=address,
+        command=command,
+        byte_count=byte_count,
+        data=pdu_data,
+        checksum=checksum,
+        preamble_count=preamble_count,
+        expansion_bytes=expansion_bytes,
+    )
 
 
 def build_session_init(
@@ -246,9 +266,8 @@ def build_session_init(
     Returns:
         Complete Session Initiate message bytes.
     """
-    from .constants import HARTIPMessageID, HARTIPMessageType
 
-    payload = _struct.pack(">BI", master_type, inactivity_timer)
+    payload = Int8ub.build(master_type) + Int32ub.build(inactivity_timer)
     total_len = HARTIP_HEADER_SIZE + len(payload)
     header = HARTIPHeader.build(
         dict(
@@ -265,7 +284,6 @@ def build_session_init(
 
 def build_session_close(sequence: int, *, version: int = 1) -> bytes:
     """Build a HART-IP Session Close request."""
-    from .constants import HARTIPMessageID, HARTIPMessageType
 
     header = HARTIPHeader.build(
         dict(
@@ -282,7 +300,6 @@ def build_session_close(sequence: int, *, version: int = 1) -> bytes:
 
 def build_keep_alive(sequence: int, *, version: int = 1) -> bytes:
     """Build a HART-IP Keep Alive request."""
-    from .constants import HARTIPMessageID, HARTIPMessageType
 
     header = HARTIPHeader.build(
         dict(
@@ -321,7 +338,6 @@ def build_request(
     Returns:
         Complete HART-IP message bytes.
     """
-    from .constants import HARTIPMessageID, HARTIPMessageType
 
     pdu = build_pdu(delimiter, address, command, data)
     total_len = HARTIP_HEADER_SIZE + len(pdu)

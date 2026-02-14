@@ -3,6 +3,7 @@
 import struct
 import threading
 import time
+import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,13 +11,20 @@ import pytest
 from hartip.client import HARTIPClient, HARTIPResponse
 from hartip.constants import (
     HARTIP_HEADER_SIZE,
+    HARTIP_V2_PSK_CIPHERS,
     HARTFrameType,
     HARTIPMessageType,
     HARTIPStatus,
     HARTResponseCode,
 )
 from hartip.device import DeviceInfo, Variable, parse_cmd0, parse_cmd1, parse_cmd3
-from hartip.exceptions import HARTIPConnectionError, HARTIPStatusError
+from hartip.exceptions import (
+    HARTCommunicationError,
+    HARTIPConnectionError,
+    HARTIPStatusError,
+    HARTIPTLSError,
+    HARTResponseError,
+)
 from hartip.protocol import HARTIPHeader, build_pdu, xor_checksum
 
 
@@ -126,7 +134,7 @@ class TestHARTIPClient:
                 client.connect()
 
     def test_session_init_failure(self) -> None:
-        session_resp = _build_session_init_response(status=HARTIPStatus.INVALID_SESSION)
+        session_resp = _build_session_init_response(status=HARTIPStatus.ERROR_TOO_FEW_DATA_BYTES)
 
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
@@ -165,7 +173,7 @@ class TestHARTIPClient:
 
     def test_status_error_raised(self) -> None:
         session_resp = _build_session_init_response()
-        cmd_resp = _build_mock_response(status=HARTIPStatus.BUFFER_OVERFLOW)
+        cmd_resp = _build_mock_response(status=HARTIPStatus.WARNING_SET_TO_NEAREST_VALUE)
         close_resp = _build_session_close_response()
 
         with patch("hartip.client.socket.socket") as mock_sock_cls:
@@ -532,3 +540,371 @@ class TestDelayedResponse:
             assert resp.response_code == 0
             assert resp.success
             client.close()
+
+
+# ---------------------------------------------------------------------------
+# HARTIPResponse – __repr__
+# ---------------------------------------------------------------------------
+
+
+class TestHARTIPResponseRepr:
+    def test_repr_with_pdu(self) -> None:
+        class FakePdu:
+            command = 0
+        resp = HARTIPResponse(header=None, pdu=FakePdu(), response_code=0, payload=b"\x01\x02")
+        r = repr(resp)
+        assert "cmd=0" in r
+        assert "rc=0" in r
+        assert "2B" in r
+
+    def test_repr_without_pdu(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0)
+        r = repr(resp)
+        assert "cmd=?" in r
+
+    def test_repr_error(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=1)
+        r = repr(resp)
+        assert "UNDEFINED_COMMAND" in r
+
+    def test_repr_comm_error(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0xC0, comm_error=True)
+        r = repr(resp)
+        assert "Communication error" in r
+
+
+# ---------------------------------------------------------------------------
+# HARTIPResponse – raise_for_error
+# ---------------------------------------------------------------------------
+
+
+class TestRaiseForError:
+    def test_success_does_not_raise(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0)
+        resp.raise_for_error()  # should not raise
+
+    def test_comm_error_raises_communication_error(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0xC0, comm_error=True)
+        with pytest.raises(HARTCommunicationError) as exc_info:
+            resp.raise_for_error()
+        assert exc_info.value.flags == 0xC0
+
+    def test_response_code_raises_response_error(self) -> None:
+        class FakePdu:
+            command = 48
+        resp = HARTIPResponse(header=None, pdu=FakePdu(), response_code=1)
+        with pytest.raises(HARTResponseError) as exc_info:
+            resp.raise_for_error()
+        assert exc_info.value.code == 1
+        assert exc_info.value.command == 48
+
+    def test_response_error_without_pdu(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=5)
+        with pytest.raises(HARTResponseError) as exc_info:
+            resp.raise_for_error()
+        assert exc_info.value.code == 5
+
+
+# ---------------------------------------------------------------------------
+# HARTIPResponse – error_code property
+# ---------------------------------------------------------------------------
+
+
+class TestErrorCodeProperty:
+    def test_known_code(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=1)
+        assert resp.error_code == HARTResponseCode.UNDEFINED_COMMAND
+
+    def test_unknown_code(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=250)
+        assert resp.error_code is None
+
+    def test_success_code(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0)
+        assert resp.error_code == HARTResponseCode.SUCCESS
+
+    def test_comm_error_returns_none(self) -> None:
+        resp = HARTIPResponse(header=None, pdu=None, response_code=0x80, comm_error=True)
+        assert resp.error_code is None
+
+
+# ---------------------------------------------------------------------------
+# Client – __repr__ (credential safety)
+# ---------------------------------------------------------------------------
+
+
+class TestClientRepr:
+    def test_repr_basic(self) -> None:
+        client = HARTIPClient("192.168.1.1")
+        r = repr(client)
+        assert "192.168.1.1" in r
+        assert "udp" in r
+
+    def test_repr_with_tls(self) -> None:
+        client = HARTIPClient("192.168.1.1", protocol="tcp", version=2)
+        r = repr(client)
+        assert "tls=True" in r
+
+    def test_repr_redacts_psk_key(self) -> None:
+        client = HARTIPClient(
+            "192.168.1.1",
+            protocol="tcp",
+            version=2,
+            psk_identity="admin",
+            psk_key=b"\x00" * 16,
+        )
+        r = repr(client)
+        assert "admin" in r
+        assert "psk_key=<redacted>" in r
+        assert b"\x00".hex() not in r  # ensure actual key bytes are not in repr
+
+    def test_repr_no_tls_no_psk(self) -> None:
+        client = HARTIPClient("10.0.0.1", protocol="udp", version=1)
+        r = repr(client)
+        assert "tls" not in r
+        assert "psk" not in r
+
+
+# ---------------------------------------------------------------------------
+# Client – warnings
+# ---------------------------------------------------------------------------
+
+
+class TestClientWarnings:
+    def test_v2_udp_dtls_warning(self) -> None:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            HARTIPClient("127.0.0.1", protocol="udp", version=2)
+            assert len(w) == 1
+            assert "DTLS" in str(w[0].message)
+
+    def test_ssl_context_with_psk_warning(self) -> None:
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            HARTIPClient(
+                "127.0.0.1",
+                protocol="tcp",
+                version=2,
+                psk_identity="test",
+                psk_key=b"\x00" * 16,
+                ssl_context=ctx,
+            )
+            # Should have both the ssl_context+psk warning
+            psk_warnings = [x for x in w if "psk_identity" in str(x.message)]
+            assert len(psk_warnings) == 1
+
+    def test_no_warning_normal_usage(self) -> None:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            HARTIPClient("127.0.0.1", protocol="udp", version=1)
+            assert len(w) == 0
+
+
+# ---------------------------------------------------------------------------
+# Client – TLS error wrapping
+# ---------------------------------------------------------------------------
+
+
+class TestTLSErrorWrapping:
+    def test_tls_handshake_failure_raises_tls_error(self) -> None:
+        """TLS handshake failure should raise HARTIPTLSError, not HARTIPConnectionError."""
+        import ssl
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            # Make wrap_socket raise SSLError
+            with patch("hartip.client.ssl.SSLContext") as mock_ctx_cls:
+                mock_ctx = MagicMock()
+                mock_ctx_cls.return_value = mock_ctx
+                mock_ctx.check_hostname = False
+                mock_ctx.wrap_socket.side_effect = ssl.SSLError("handshake failed")
+
+                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True)
+                with pytest.raises(HARTIPTLSError, match="handshake failed"):
+                    client.connect()
+
+    def test_tls_error_caught_by_connection_error(self) -> None:
+        """HARTIPTLSError should be catchable as HARTIPConnectionError."""
+        import ssl
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            with patch("hartip.client.ssl.SSLContext") as mock_ctx_cls:
+                mock_ctx = MagicMock()
+                mock_ctx_cls.return_value = mock_ctx
+                mock_ctx.check_hostname = False
+                mock_ctx.wrap_socket.side_effect = ssl.SSLError("bad cert")
+
+                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True)
+                with pytest.raises(HARTIPConnectionError):
+                    client.connect()
+
+
+# ---------------------------------------------------------------------------
+# Client – ciphers parameter
+# ---------------------------------------------------------------------------
+
+
+class TestCiphersParameter:
+    def test_custom_ciphers_stored(self) -> None:
+        client = HARTIPClient(
+            "127.0.0.1",
+            protocol="tcp",
+            version=2,
+            ciphers=HARTIP_V2_PSK_CIPHERS,
+        )
+        assert client._ciphers == HARTIP_V2_PSK_CIPHERS
+
+    def test_default_ciphers_is_none(self) -> None:
+        client = HARTIPClient("127.0.0.1")
+        assert client._ciphers is None
+
+
+# ---------------------------------------------------------------------------
+# Client – convenience methods with unique_addr
+# ---------------------------------------------------------------------------
+
+
+class TestConvenienceUniqueAddr:
+    def _make_connected_client(self, mock_sock):
+        session_resp = _build_session_init_response()
+        mock_sock.recvfrom.side_effect = [
+            (session_resp, _ADDR),
+        ]
+        client = HARTIPClient("127.0.0.1", protocol="udp")
+        client.connect()
+        return client
+
+    def test_read_unique_id_with_unique_addr(self) -> None:
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            addr = bytes([0x80, 0x26, 0x01, 0x02, 0x03])
+            resp = client.read_unique_id(unique_addr=addr)
+            assert resp.response_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Client – send_command auto-detect long frame
+# ---------------------------------------------------------------------------
+
+
+class TestAutoDetectLongFrame:
+    def test_unique_addr_implies_long_frame(self) -> None:
+        """Passing unique_addr without use_long_frame=True should still use long frame."""
+        session_resp = _build_session_init_response()
+        cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
+        close_resp = _build_session_close_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.side_effect = [
+                (session_resp, _ADDR),
+                (cmd_resp, _ADDR),
+                (close_resp, _ADDR),
+            ]
+
+            client = HARTIPClient("127.0.0.1", protocol="udp")
+            client.connect()
+            addr = bytes([0x80, 0x26, 0x01, 0x02, 0x03])
+            resp = client.send_command(0, unique_addr=addr)
+            assert resp.response_code == 0
+            client.close()
+
+
+# ---------------------------------------------------------------------------
+# Client – cert_validator callback
+# ---------------------------------------------------------------------------
+
+
+class TestCertValidator:
+    def test_validator_accepted(self) -> None:
+        """cert_validator returning True should allow the connection."""
+        calls = []
+
+        def _accept(cert):
+            calls.append(cert)
+            return True
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            with patch("hartip.client.ssl.SSLContext") as mock_ctx_cls:
+                mock_ctx = MagicMock()
+                mock_ctx_cls.return_value = mock_ctx
+                mock_ctx.check_hostname = False
+                tls_sock = MagicMock()
+                tls_sock.getpeercert.return_value = {"subject": "test"}
+                mock_ctx.wrap_socket.return_value = tls_sock
+                # Make session init succeed
+                session_resp = _build_session_init_response()
+                tls_sock.recv.return_value = session_resp
+
+                client = HARTIPClient(
+                    "127.0.0.1", protocol="tcp", tls=True, cert_validator=_accept
+                )
+                client.connect()
+                assert len(calls) == 1
+                assert calls[0] == {"subject": "test"}
+                client.close()
+
+    def test_validator_rejected_false(self) -> None:
+        """cert_validator returning False should raise HARTIPTLSError."""
+
+        def _reject(_cert):
+            return False
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            with patch("hartip.client.ssl.SSLContext") as mock_ctx_cls:
+                mock_ctx = MagicMock()
+                mock_ctx_cls.return_value = mock_ctx
+                mock_ctx.check_hostname = False
+                tls_sock = MagicMock()
+                tls_sock.getpeercert.return_value = {"subject": "bad"}
+                mock_ctx.wrap_socket.return_value = tls_sock
+
+                client = HARTIPClient(
+                    "127.0.0.1", protocol="tcp", tls=True, cert_validator=_reject
+                )
+                with pytest.raises(HARTIPTLSError, match="rejected by cert_validator"):
+                    client.connect()
+                tls_sock.close.assert_called()
+
+    def test_validator_raises_exception(self) -> None:
+        """cert_validator raising should wrap in HARTIPTLSError."""
+
+        def _crash(_cert):
+            raise ValueError("fingerprint mismatch")
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            with patch("hartip.client.ssl.SSLContext") as mock_ctx_cls:
+                mock_ctx = MagicMock()
+                mock_ctx_cls.return_value = mock_ctx
+                mock_ctx.check_hostname = False
+                tls_sock = MagicMock()
+                tls_sock.getpeercert.return_value = {}
+                mock_ctx.wrap_socket.return_value = tls_sock
+
+                client = HARTIPClient(
+                    "127.0.0.1", protocol="tcp", tls=True, cert_validator=_crash
+                )
+                with pytest.raises(HARTIPTLSError, match="fingerprint mismatch"):
+                    client.connect()
+                tls_sock.close.assert_called()
+
+    def test_no_validator_by_default(self) -> None:
+        """Without cert_validator, no post-handshake check runs."""
+        client = HARTIPClient("127.0.0.1")
+        assert client._cert_validator is None

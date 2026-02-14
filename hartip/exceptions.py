@@ -31,6 +31,22 @@ class HARTIPConnectionError(HARTIPError):
     pass
 
 
+class HARTIPTLSError(HARTIPConnectionError):
+    """TLS/DTLS handshake or configuration failure.
+
+    Raised when the TLS layer fails during connection setup.
+    Subclass of :class:`HARTIPConnectionError` so existing ``except``
+    blocks that catch connection errors still work.
+
+    Attributes:
+        ssl_error: The underlying :class:`ssl.SSLError` if available.
+    """
+
+    def __init__(self, message: str, ssl_error: object | None = None):
+        super().__init__(message)
+        self.ssl_error = ssl_error
+
+
 class HARTIPStatusError(HARTIPError):
     """HART-IP header returned non-zero status."""
 

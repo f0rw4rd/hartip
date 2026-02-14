@@ -89,7 +89,7 @@ UNITS: dict[int, str] = {
     67: "uS/cm",        # microsiemens per centimeter
     # -- Force (codes 68-69) --
     68: "N",            # Newtons
-    69: "Nm",           # Newton meters
+    69: "J",            # Joules
     # -- Mass flow (codes 70-88) --
     70: "g/s",          # grams per second
     71: "g/min",        # grams per minute

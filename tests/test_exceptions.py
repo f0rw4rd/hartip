@@ -10,6 +10,7 @@ from hartip.exceptions import (
     HARTIPError,
     HARTIPStatusError,
     HARTIPTimeoutError,
+    HARTIPTLSError,
     HARTProtocolError,
     HARTResponseError,
 )
@@ -39,6 +40,12 @@ class TestExceptionHierarchy:
 
     def test_communication_is_protocol_error(self) -> None:
         assert issubclass(HARTCommunicationError, HARTProtocolError)
+
+    def test_tls_error_is_connection_error(self) -> None:
+        assert issubclass(HARTIPTLSError, HARTIPConnectionError)
+
+    def test_tls_error_is_hartip_error(self) -> None:
+        assert issubclass(HARTIPTLSError, HARTIPError)
 
 
 class TestHARTChecksumError:
@@ -97,3 +104,30 @@ class TestHARTCommunicationError:
     def test_unknown_flags(self) -> None:
         exc = HARTCommunicationError(0x00)
         assert "unknown" in str(exc)
+
+
+class TestHARTIPTLSError:
+    def test_message(self) -> None:
+        exc = HARTIPTLSError("TLS handshake failed: bad cert")
+        assert "TLS handshake failed" in str(exc)
+
+    def test_ssl_error_attribute(self) -> None:
+        import ssl
+
+        ssl_exc = ssl.SSLError("test ssl error")
+        exc = HARTIPTLSError("TLS failed", ssl_error=ssl_exc)
+        assert exc.ssl_error is ssl_exc
+
+    def test_ssl_error_none_by_default(self) -> None:
+        exc = HARTIPTLSError("TLS failed")
+        assert exc.ssl_error is None
+
+    def test_caught_by_connection_error(self) -> None:
+        """HARTIPTLSError should be catchable as HARTIPConnectionError."""
+        exc = HARTIPTLSError("test")
+        try:
+            raise exc
+        except HARTIPConnectionError as caught:
+            assert caught is exc
+        else:
+            pytest.fail("HARTIPTLSError not caught by HARTIPConnectionError")

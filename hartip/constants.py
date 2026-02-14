@@ -18,6 +18,7 @@ class HARTIPVersion(IntEnum):
     """HART-IP protocol version."""
 
     V1 = 1  # Plaintext (TP10300)
+    V2 = 2  # Mandatory TLS/DTLS (TP10300 rev 2020)
 
 
 class HARTIPMessageType(IntEnum):
@@ -53,21 +54,21 @@ DEFAULT_INACTIVITY_TIMER = 30000
 
 
 class HARTIPStatus(IntEnum):
-    """HART-IP status codes (TP10300 Section 6.3 / 20081/TS20081/9.1 Section 10.3.2)."""
+    """HART-IP status codes (TP10300 Section 6.3 / 20081/TS20081/9.1 Section 10.3.2).
+
+    Reference: CISAGOV hart_ip_enum.spicy StatusCode, FieldComm C# HARTIPConnect.cs,
+    hipserver hstypes.h HARTIP_SESSION_ERROR_TYPE.
+    """
 
     SUCCESS = 0
-    WARNING = 1
-    ERROR = 2
-    BUSY = 3
-    INVALID_MESSAGE_TYPE = 4
-    INVALID_SESSION = 5
-    TOO_FEW_BYTES = 6
-    TOO_MANY_BYTES = 7
-    BUFFER_OVERFLOW = 8
+    ERROR_INVALID_SELECTION = 2  # Invalid Master Type (hstypes.h: INVALID_MASTER_TYPE)
+    ERROR_TOO_FEW_DATA_BYTES = 5  # Too Few Data Bytes Received
+    ERROR_DEVICE_SPECIFIC = 6  # Device Specific Command Error
+    WARNING_SET_TO_NEAREST_VALUE = 8  # Inactivity Timer set to nearest possible value
     ERROR_SECURITY_NOT_INITIALIZED = 9
     WARNING_PROTOCOL_VERSION_NOT_SUPPORTED = 14
     ERROR_ALL_SESSIONS_IN_USE = 15
-    ERROR_ACCESS_RESTRICTED = 16
+    ERROR_SESSION_ALREADY_EXISTS = 16  # Session already established (hstypes.h: SESSION_EXISTS)
     WARNING_INSECURE_SESSION_EXISTS = 30
 
 
@@ -190,48 +191,48 @@ class HARTCommand(IntEnum):
 class HARTResponseCode(IntEnum):
     """HART response codes (first byte of response data).
 
-    Codes 0-31 are universal response codes.
-    Code 32+ are command-specific or special codes.
-    Codes 65-66 are delayed-response codes critical for gateway communication.
+    Codes 0-15 are universal response codes (Spec 307).
+    Codes 16-31 have command-specific meanings (some universal defaults below).
+    Codes 32-36 are delayed-response / busy codes.
+    Code 64 means command not implemented.
+
+    Reference: hartdefs.h (hipserver), HARTMessage.cs (FieldComm C#),
+    Wireshark packet-hartip.c dissector.
     """
 
     SUCCESS = 0
-    UNDEFINED_COMMAND = 1
-    INVALID_SELECTION = 2
-    PARAMETER_TOO_LARGE = 3
-    PARAMETER_TOO_SMALL = 4
-    TOO_FEW_DATA_BYTES = 5
-    TRANSMITTER_SPECIFIC = 6
-    IN_WRITE_PROTECT_MODE = 7
-    UPDATE_FAILURE = 8
-    SET_TO_NEAREST_VALUE = 9
-    INVALID_TIME_CODE = 10
-    INVALID_POLARITY = 11
-    INVALID_BURST_MODE = 12
-    UNKNOWN_MESSAGE_ID = 13
-    LOOP_CURRENT_NOT_ACTIVE = 14
+    UNDEFINED_COMMAND = 1  # Not defined / Invalid command
+    INVALID_SELECTION = 2  # RC_INVALID
+    PARAMETER_TOO_LARGE = 3  # RC_TOO_LRG
+    PARAMETER_TOO_SMALL = 4  # RC_TOO_SML
+    TOO_FEW_DATA_BYTES = 5  # RC_TOO_FEW
+    TRANSMITTER_SPECIFIC = 6  # RC_DEV_SPEC (Device Specific Command Error)
+    IN_WRITE_PROTECT_MODE = 7  # RC_WRT_PROT
+    UPDATE_FAILURE = 8  # RC_WARN_8 (Warning: Update Failure)
+    SET_TO_NEAREST_VALUE = 9  # RC_MULTIPLE_9
+    INVALID_TIME_CODE = 10  # RC_MULTIPLE_10
+    INVALID_POLARITY = 11  # RC_MULTIPLE_11
+    INVALID_BURST_MODE = 12  # RC_MULTIPLE_12
+    UNKNOWN_MESSAGE_ID = 13  # RC_MULTIPLE_13
+    LOOP_CURRENT_NOT_ACTIVE = 14  # RC_WARN_14
     LOOP_CURRENT_FIXED = 15
-    DEVICE_BUSY = 16
-    INVALID_DEVICE_VAR_INDEX = 17
-    INVALID_UNITS_CODE = 18
-    DEVICE_VAR_INDEX_NOT_ALLOWED = 19
-    INVALID_EXTENDED_CMD_NUMBER = 20
+    ACCESS_RESTRICTED = 16  # RC_ACC_RESTR (Access Restricted)
+    INVALID_DEVICE_VAR_INDEX = 17  # RC_BAD_INDEX
+    INVALID_UNITS_CODE = 18  # RC_BAD_UNITS
+    DEVICE_VAR_INDEX_NOT_ALLOWED = 19  # RC_INDEX_DISALLOWED
+    INVALID_EXTENDED_CMD_NUMBER = 20  # RC_BAD_EXT_CMD
     INVALID_ANALOG_CHANNEL_NUMBER = 21
-    # 22-27: reserved
+    # 22-27: reserved / command-specific
     INVALID_RANGE_VALUE = 28
     INVALID_DAMPING_VALUE = 29
-    ADJUST_TRIM_ERROR = 30
+    RESPONSE_TRUNCATED = 30  # RC_TRUNCATED (Warning: Response Truncated)
     INVALID_DEVICE_VAR_CLASSIFICATION = 31
-    CMD_NOT_IMPLEMENTED = 32
-    ACCESS_RESTRICTED = 33
-    DR_RUNNING = 34  # Delayed Response Running
-    DR_DEAD = 35  # Delayed Response Dead
-    DR_CONFLICT = 36  # Delayed Response Conflict
-    DEVICE_MALFUNCTION = 64
-
-    # --- Delayed-response codes (critical for gateway operation) ---
-    DELAYED_RESPONSE_INITIATED = 65
-    DELAYED_RESPONSE_COMPLETED = 66
+    DEVICE_BUSY = 32  # RC_BUSY
+    DR_INITIATED = 33  # RC_DR_INIT (Delayed Response Initiated)
+    DR_RUNNING = 34  # RC_DR_RUNNING (Delayed Response Running)
+    DR_DEAD = 35  # RC_DR_DEAD (Delayed Response Dead)
+    DR_CONFLICT = 36  # RC_DR_CONFL (Delayed Response Conflict)
+    CMD_NOT_IMPLEMENTED = 64  # RC_NOT_IMPLEM
 
 
 class HARTDeviceStatus(IntEnum):
@@ -289,3 +290,53 @@ DR_MAX_RETRIES = 100
 # Matches C# FieldComm: RSP_DEVICE_BUSY(32), RSP_DR_INITIATE(33),
 # RSP_DR_RUNNING(34), RSP_DR_CONFLICT(36).
 DR_RETRY_CODES = frozenset({32, 33, 34, 36})
+
+# ---------------------------------------------------------------------------
+# HART-IP v2 security constants (TP10300 rev 2020 / hipserver reference)
+# ---------------------------------------------------------------------------
+
+# v2 cipher suites (from hipserver hsconnectionmanager.h)
+HARTIP_V2_PSK_CIPHERS = "PSK-AES128-GCM-SHA256:PSK-AES128-CBC-SHA256:PSK-AES128-CCM"
+HARTIP_V2_SRP_CIPHERS = "SRP-AES-128-CBC-SHA"
+HARTIP_V2_ALL_CIPHERS = (
+    "PSK-AES128-GCM-SHA256:PSK-AES128-CBC-SHA256:PSK-AES128-CCM:SRP-AES-128-CBC-SHA"
+)
+
+# Minimum TLS/DTLS version required by HART-IP v2
+HARTIP_V2_MIN_TLS_VERSION = "TLSv1.2"
+HARTIP_V2_MIN_DTLS_VERSION = "DTLSv1.2"
+
+# Direct PDU (msg_id=4) header overhead: device_status(1) + extended_status(1)
+DIRECT_PDU_HEADER_SIZE = 2
+
+# Direct PDU per-command overhead: command_number(2) + byte_count(1)
+DIRECT_PDU_CMD_HEADER_SIZE = 3
+
+# Read Audit Log (msg_id=5) request size: start_record(1) + number_of_records(1)
+AUDIT_LOG_REQUEST_SIZE = 2
+
+# Session log record size per CISAGOV Spicy parser (fixed-length record)
+# ipv4(4) + ipv6(16) + client_port(2) + server_port(2) + connect_time(8)
+# + disconnect_time(8) + session_status(2) + start_config(2) + end_config(2)
+# + num_publish(4) + num_request(4) + num_response(4)
+SESSION_LOG_RECORD_SIZE = 58
+
+
+class HARTIPServerStatus(IntFlag):
+    """Server status flags from Read Audit Log response (TP10300 Section 10.3.2.6)."""
+
+    NONE = 0x0000
+    UNABLE_TO_LOCATE_SYSLOG_SERVER = 0x0001
+    SYSLOG_CONNECTION_FAILED = 0x0002
+    INSECURE_SYSLOG_CONNECTION = 0x0004
+
+
+class HARTIPSessionStatus(IntFlag):
+    """Session status summary flags (TP10300 Section 10.3.2.6)."""
+
+    NONE = 0x0000
+    WRITES_OCCURRED = 0x0001
+    BAD_SESSION_INITIALIZATION = 0x0002
+    ABORTED_SESSION = 0x0004
+    SESSION_TIMEOUT = 0x0008
+    INSECURE_SESSION = 0x0010
