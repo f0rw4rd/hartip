@@ -55,8 +55,25 @@ from hartip.device import (
     parse_cmd21,
     parse_cmd22,
     parse_cmd33,
+    parse_cmd35,
     parse_cmd38,
+    parse_cmd44,
     parse_cmd48,
+    parse_cmd52,
+    parse_cmd53,
+    parse_cmd54,
+    parse_cmd79,
+    parse_cmd90,
+    parse_cmd95,
+    parse_cmd103,
+    parse_cmd104,
+    parse_cmd105,
+    parse_cmd107,
+    parse_cmd108,
+    parse_cmd109,
+    parse_cmd512,
+    parse_cmd513,
+    parse_cmd534,
 )
 from hartip.exceptions import (
     HARTChecksumError,
@@ -1825,3 +1842,361 @@ class TestParseCmd38Edges:
     def test_extra_bytes_ignored(self):
         result = parse_cmd38(bytes([0, 10, 0xFF, 0xFF]))
         assert result["configuration_change_counter"] == 10
+
+
+# ===========================================================================
+# Common-practice command parsers (from FieldComm hipflowapp reference)
+# ===========================================================================
+
+
+class TestParseCmd35:
+    """Command 35 (Write PV Range Values) — 9B: units + upper_range + lower_range."""
+
+    def test_valid(self):
+        payload = bytes([39]) + struct.pack(">f", 100.0) + struct.pack(">f", 0.0)
+        result = parse_cmd35(payload)
+        assert result["range_value_units"] == 39
+        assert abs(result["upper_range_value"] - 100.0) < 1e-5
+        assert abs(result["lower_range_value"] - 0.0) < 1e-5
+        assert "range_unit_name" in result
+
+    def test_too_short(self):
+        assert parse_cmd35(b"\x27" + b"\x00" * 7) == {}
+        assert parse_cmd35(b"") == {}
+
+    def test_extra_bytes(self):
+        payload = bytes([39]) + struct.pack(">f", 50.0) + struct.pack(">f", 10.0) + b"\xFF"
+        result = parse_cmd35(payload)
+        assert abs(result["upper_range_value"] - 50.0) < 1e-5
+
+
+class TestParseCmd44:
+    """Command 44 (Write PV Units) — 1B: pv_units_code."""
+
+    def test_valid(self):
+        result = parse_cmd44(bytes([39]))
+        assert result["pv_units_code"] == 39
+        assert "pv_unit_name" in result
+
+    def test_too_short(self):
+        assert parse_cmd44(b"") == {}
+
+    def test_boundary_unit_code(self):
+        result = parse_cmd44(bytes([250]))
+        assert result["pv_units_code"] == 250
+
+
+class TestParseCmd52:
+    """Command 52 (Set Device Variable Zero) — 1B: dv_code echo."""
+
+    def test_valid(self):
+        result = parse_cmd52(bytes([3]))
+        assert result["device_variable_code"] == 3
+
+    def test_too_short(self):
+        assert parse_cmd52(b"") == {}
+
+
+class TestParseCmd53:
+    """Command 53 (Write Device Variable Units) — 2B: dv_code + units."""
+
+    def test_valid(self):
+        result = parse_cmd53(bytes([0, 39]))
+        assert result["device_variable_code"] == 0
+        assert result["units_code"] == 39
+        assert "unit_name" in result
+
+    def test_too_short(self):
+        assert parse_cmd53(b"\x00") == {}
+        assert parse_cmd53(b"") == {}
+
+
+class TestParseCmd54:
+    """Command 54 (Read Device Variable Information) — up to 28B."""
+
+    def _build_payload(self) -> bytes:
+        # dv_code(1) + serial(3) + units(1) + upper(4f) + lower(4f) +
+        # damping(4f) + min_span(4f) + classification(1) + family(1) +
+        # acq_period(4f) + properties(1)
+        payload = bytes([0])  # dv_code
+        payload += bytes([0, 0, 42])  # serial = 42
+        payload += bytes([39])  # units
+        payload += struct.pack(">f", 100.0)  # upper
+        payload += struct.pack(">f", 0.0)  # lower
+        payload += struct.pack(">f", 1.0)  # damping
+        payload += struct.pack(">f", 0.1)  # min_span
+        payload += bytes([64])  # classification
+        payload += bytes([0])  # family
+        payload += struct.pack(">f", 0.5)  # acq_period
+        payload += bytes([0x03])  # properties
+        return payload
+
+    def test_full_response(self):
+        result = parse_cmd54(self._build_payload())
+        assert result["device_variable_code"] == 0
+        assert result["sensor_serial_number"] == 42
+        assert result["units_code"] == 39
+        assert abs(result["upper_sensor_limit"] - 100.0) < 1e-5
+        assert abs(result["lower_sensor_limit"] - 0.0) < 1e-5
+        assert abs(result["damping_value"] - 1.0) < 1e-5
+        assert abs(result["minimum_span"] - 0.1) < 1e-5
+        assert result["classification"] == 64
+        assert result["device_family"] == 0
+        assert abs(result["acquisition_period"] - 0.5) < 1e-5
+        assert result["properties"] == 0x03
+
+    def test_minimal_valid(self):
+        """7 bytes: dv_code + serial(3) + units + partial."""
+        payload = bytes([2, 0, 1, 0, 39, 0, 0])
+        result = parse_cmd54(payload)
+        assert result["device_variable_code"] == 2
+        assert result["sensor_serial_number"] == 256
+        assert result["units_code"] == 39
+        assert "upper_sensor_limit" not in result
+
+    def test_too_short(self):
+        assert parse_cmd54(b"\x00\x00\x00") == {}
+        assert parse_cmd54(b"") == {}
+
+
+class TestParseCmd79:
+    """Command 79 (Write Device Variable) — 8B."""
+
+    def test_valid(self):
+        payload = bytes([0, 1, 39]) + struct.pack(">f", 25.0) + bytes([0])
+        result = parse_cmd79(payload)
+        assert result["device_variable_code"] == 0
+        assert result["write_dv_command_code"] == 1
+        assert result["simulation_units_code"] == 39
+        assert abs(result["simulation_value"] - 25.0) < 1e-5
+        assert result["device_family"] == 0
+
+    def test_normal_mode(self):
+        """Normal (non-simulated) response: code=0, units=250(Not Used), NaN."""
+        nan_bytes = struct.pack(">f", float("nan"))
+        payload = bytes([0, 0, 250]) + nan_bytes + bytes([0])
+        result = parse_cmd79(payload)
+        assert result["write_dv_command_code"] == 0
+        assert result["simulation_units_code"] == 250
+        assert math.isnan(result["simulation_value"])
+
+    def test_too_short(self):
+        assert parse_cmd79(b"\x00" * 7) == {}
+
+
+class TestParseCmd90:
+    """Command 90 (Read Device & Message Timing) — 15B."""
+
+    def test_valid(self):
+        payload = bytes([
+            14,     # day
+            2,      # month
+            126,    # year (1900+126=2026)
+        ])
+        payload += struct.pack(">I", 32000)  # device_timestamp
+        payload += bytes([14, 2, 126])  # last received date
+        payload += struct.pack(">I", 16000)  # last_received_timestamp
+        payload += bytes([0x01])  # rtc_flags
+        result = parse_cmd90(payload)
+        assert result["device_date_day"] == 14
+        assert result["device_date_month"] == 2
+        assert result["device_date_year"] == 126
+        assert result["device_timestamp"] == 32000
+        assert result["last_received_date_day"] == 14
+        assert result["last_received_timestamp"] == 16000
+        assert result["rtc_flags"] == 0x01
+
+    def test_too_short(self):
+        assert parse_cmd90(b"\x00" * 14) == {}
+        assert parse_cmd90(b"") == {}
+
+
+class TestParseCmd95:
+    """Command 95 (Read Device Message Statistics) — 6B."""
+
+    def test_valid(self):
+        payload = struct.pack(">HHH", 1000, 950, 50)
+        result = parse_cmd95(payload)
+        assert result["stx_count"] == 1000
+        assert result["ack_count"] == 950
+        assert result["nak_count"] == 50
+
+    def test_zero_counters(self):
+        result = parse_cmd95(b"\x00" * 6)
+        assert result["stx_count"] == 0
+        assert result["ack_count"] == 0
+        assert result["nak_count"] == 0
+
+    def test_too_short(self):
+        assert parse_cmd95(b"\x00" * 5) == {}
+
+
+class TestParseCmd103:
+    """Command 103 (Write Burst Period) — 9B."""
+
+    def test_valid(self):
+        payload = bytes([0])  # burst_msg_number
+        payload += struct.pack(">I", 32000)  # 1 second in 1/32 ms
+        payload += struct.pack(">I", 960000)  # 30 seconds
+        result = parse_cmd103(payload)
+        assert result["burst_message_number"] == 0
+        assert result["burst_comm_period"] == 32000
+        assert result["max_burst_comm_period"] == 960000
+
+    def test_too_short(self):
+        assert parse_cmd103(b"\x00" * 8) == {}
+
+
+class TestParseCmd104:
+    """Command 104 (Write Burst Trigger) — 8B."""
+
+    def test_continuous_mode(self):
+        payload = bytes([0, 0, 0, 250]) + struct.pack(">f", 0.0)
+        result = parse_cmd104(payload)
+        assert result["burst_message_number"] == 0
+        assert result["trigger_mode"] == 0
+        assert result["trigger_units_code"] == 250
+
+    def test_window_mode(self):
+        payload = bytes([1, 1, 64, 39]) + struct.pack(">f", 5.0)
+        result = parse_cmd104(payload)
+        assert result["trigger_mode"] == 1
+        assert result["trigger_classification"] == 64
+        assert abs(result["trigger_value"] - 5.0) < 1e-5
+
+    def test_too_short(self):
+        assert parse_cmd104(b"\x00" * 7) == {}
+
+
+class TestParseCmd105:
+    """Command 105 (Read Burst Mode Configuration) — complex response."""
+
+    def _build_full_payload(self) -> bytes:
+        payload = bytes([1])  # burst_mode_control
+        payload += bytes([31])  # non-legacy marker
+        payload += bytes([0, 1, 2, 250, 250, 250, 250, 250])  # index list
+        payload += bytes([0, 3])  # burst_msg_num, max_msgs
+        payload += struct.pack(">H", 9)  # command_number
+        payload += struct.pack(">I", 32000)  # burst_comm_period
+        payload += struct.pack(">I", 960000)  # max_burst_comm_period
+        payload += bytes([1, 64, 39])  # trigger mode/class/units
+        payload += struct.pack(">f", 5.0)  # trigger_value
+        return payload
+
+    def test_full_response(self):
+        result = parse_cmd105(self._build_full_payload())
+        assert result["burst_mode_control"] == 1
+        assert result["command_number_legacy"] == 31
+        assert result["device_variable_index_list"] == [0, 1, 2, 250, 250, 250, 250, 250]
+        assert result["burst_message_number"] == 0
+        assert result["max_burst_messages"] == 3
+        assert result["command_number"] == 9
+        assert result["burst_comm_period"] == 32000
+        assert result["trigger_mode"] == 1
+        assert abs(result["trigger_value"] - 5.0) < 1e-5
+
+    def test_legacy_minimal(self):
+        """Legacy: only burst_mode_control + command_number."""
+        result = parse_cmd105(bytes([0, 3]))
+        assert result["burst_mode_control"] == 0
+        assert result["command_number_legacy"] == 3
+
+    def test_too_short(self):
+        assert parse_cmd105(b"\x00") == {}
+        assert parse_cmd105(b"") == {}
+
+
+class TestParseCmd107:
+    """Command 107 (Write Burst Device Variables) — 9B."""
+
+    def test_valid(self):
+        payload = bytes([0, 1, 2, 250, 250, 250, 250, 250, 0])
+        result = parse_cmd107(payload)
+        assert result["device_variable_index_list"] == [0, 1, 2, 250, 250, 250, 250, 250]
+        assert result["burst_message_number"] == 0
+
+    def test_too_short(self):
+        assert parse_cmd107(b"\x00" * 8) == {}
+
+
+class TestParseCmd108:
+    """Command 108 (Write Burst Command Number) — 1B legacy or 3B non-legacy."""
+
+    def test_legacy(self):
+        result = parse_cmd108(bytes([9]))
+        assert result["command_number"] == 9
+        assert "burst_message_number" not in result
+
+    def test_non_legacy(self):
+        payload = struct.pack(">H", 48) + bytes([2])
+        result = parse_cmd108(payload)
+        assert result["command_number"] == 48
+        assert result["burst_message_number"] == 2
+
+    def test_too_short(self):
+        assert parse_cmd108(b"") == {}
+
+
+class TestParseCmd109:
+    """Command 109 (Burst Mode Control) — 1-2B."""
+
+    def test_legacy(self):
+        result = parse_cmd109(bytes([1]))
+        assert result["burst_mode_control"] == 1
+        assert "burst_message_number" not in result
+
+    def test_non_legacy(self):
+        result = parse_cmd109(bytes([4, 2]))
+        assert result["burst_mode_control"] == 4
+        assert result["burst_message_number"] == 2
+
+    def test_too_short(self):
+        assert parse_cmd109(b"") == {}
+
+
+class TestParseCmd512:
+    """Command 512 (Read Country & SI Unit Code) — 2B."""
+
+    def test_valid(self):
+        result = parse_cmd512(bytes([1, 0]))
+        assert result["country_code"] == 1
+        assert result["si_units_code"] == 0
+
+    def test_too_short(self):
+        assert parse_cmd512(b"\x01") == {}
+        assert parse_cmd512(b"") == {}
+
+
+class TestParseCmd513Alias:
+    """Command 513 is an alias for Command 512."""
+
+    def test_is_same_function(self):
+        assert parse_cmd513 is parse_cmd512
+
+    def test_parses_identically(self):
+        data = bytes([2, 1])
+        assert parse_cmd513(data) == parse_cmd512(data)
+
+
+class TestParseCmd534:
+    """Command 534 (Read DV Simulation Status) — 8B."""
+
+    def test_simulated(self):
+        payload = bytes([0, 1, 39]) + struct.pack(">f", 25.0) + bytes([0])
+        result = parse_cmd534(payload)
+        assert result["device_variable_code"] == 0
+        assert result["write_dv_command_code"] == 1
+        assert result["simulation_units_code"] == 39
+        assert abs(result["simulation_value"] - 25.0) < 1e-5
+        assert result["device_family"] == 0
+
+    def test_normal_mode(self):
+        """Normal mode: dv_cmd_code=0, units=250(Not Used), value=NaN."""
+        nan_bytes = struct.pack(">f", float("nan"))
+        payload = bytes([0, 0, 250]) + nan_bytes + bytes([0])
+        result = parse_cmd534(payload)
+        assert result["write_dv_command_code"] == 0
+        assert math.isnan(result["simulation_value"])
+
+    def test_too_short(self):
+        assert parse_cmd534(b"\x00" * 7) == {}

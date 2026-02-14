@@ -5,7 +5,7 @@ Provides dataclasses for device information and helper functions
 to parse universal and common-practice HART command responses.
 
 Universal: 0, 1, 2, 3, 7, 8, 9, 12, 13, 14, 15, 16, 20, 48
-Common practice: 33, 38
+Common practice: 33, 35, 38, 44, 52, 53, 54, 79, 90, 95, 103-109, 512, 534
 Aliases: 6→7, 11→0, 17→12, 18→13, 19→16, 21→0, 22→20
 """
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from construct import Float32b, Int16ub
+from construct import Float32b, Int16ub, Int32ub
 
 from .ascii import unpack_ascii
 from .constants import COMM_ERROR_MASK, HARTCommErrorFlags
@@ -626,3 +626,379 @@ def parse_cmd38(payload: bytes) -> dict:
         return {}
     counter = Int16ub.parse(payload[0:2])
     return {"configuration_change_counter": counter}
+
+
+# ---------------------------------------------------------------------------
+# Common-practice command parsers (from FieldComm hipflowapp reference)
+# ---------------------------------------------------------------------------
+
+
+def parse_cmd35(payload: bytes) -> dict:
+    """Parse Command 35 (Write PV Range Values) response.
+
+    Format (9 bytes, hipflowapp cmd_35.h insert_Data)::
+
+        Byte 0:     range_value_units
+        Bytes 1-4:  upper_range_value (IEEE 754 float)
+        Bytes 5-8:  lower_range_value (IEEE 754 float)
+    """
+    if len(payload) < 9:
+        return {}
+    range_units = payload[0]
+    upper_range = Float32b.parse(payload[1:5])
+    lower_range = Float32b.parse(payload[5:9])
+    return {
+        "range_value_units": range_units,
+        "range_unit_name": get_unit_name(range_units),
+        "upper_range_value": upper_range,
+        "lower_range_value": lower_range,
+    }
+
+
+def parse_cmd44(payload: bytes) -> dict:
+    """Parse Command 44 (Write PV Units) response.
+
+    Format (1 byte, hipflowapp cmd_44.h insert_Data)::
+
+        Byte 0: pv_units_code
+    """
+    if len(payload) < 1:
+        return {}
+    return {
+        "pv_units_code": payload[0],
+        "pv_unit_name": get_unit_name(payload[0]),
+    }
+
+
+def parse_cmd52(payload: bytes) -> dict:
+    """Parse Command 52 (Set Device Variable Zero) response.
+
+    Format (1 byte, hipflowapp cmd_52.h insert_Data)::
+
+        Byte 0: device_variable_code (echoed from request)
+    """
+    if len(payload) < 1:
+        return {}
+    return {"device_variable_code": payload[0]}
+
+
+def parse_cmd53(payload: bytes) -> dict:
+    """Parse Command 53 (Write Device Variable Units) response.
+
+    Format (2 bytes, hipflowapp cmd_53.h insert_Data)::
+
+        Byte 0: active_device_variable
+        Byte 1: units_code
+    """
+    if len(payload) < 2:
+        return {}
+    return {
+        "device_variable_code": payload[0],
+        "units_code": payload[1],
+        "unit_name": get_unit_name(payload[1]),
+    }
+
+
+def parse_cmd54(payload: bytes) -> dict:
+    """Parse Command 54 (Read Device Variable Information) response.
+
+    Format (28 bytes, hipflowapp cmd_54.h insert_Data)::
+
+        Byte 0:      device_variable_code
+        Bytes 1-3:   sensor_serial_number (Unsigned-24)
+        Byte 4:      units_code
+        Bytes 5-8:   upper_sensor_limit (float)
+        Bytes 9-12:  lower_sensor_limit (float)
+        Bytes 13-16: damping_value (float)
+        Bytes 17-20: minimum_span (float)
+        Byte 21:     classification
+        Byte 22:     device_family
+        Bytes 23-26: acquisition_period (float, seconds)
+        Byte 27:     properties (bit flags, Table 65)
+    """
+    if len(payload) < 7:
+        return {}
+    result: dict = {
+        "device_variable_code": payload[0],
+        "sensor_serial_number": (payload[1] << 16) | (payload[2] << 8) | payload[3],
+        "units_code": payload[4],
+        "unit_name": get_unit_name(payload[4]),
+    }
+    if len(payload) >= 9:
+        result["upper_sensor_limit"] = Float32b.parse(payload[5:9])
+    if len(payload) >= 13:
+        result["lower_sensor_limit"] = Float32b.parse(payload[9:13])
+    if len(payload) >= 17:
+        result["damping_value"] = Float32b.parse(payload[13:17])
+    if len(payload) >= 21:
+        result["minimum_span"] = Float32b.parse(payload[17:21])
+    if len(payload) >= 22:
+        result["classification"] = payload[21]
+    if len(payload) >= 23:
+        result["device_family"] = payload[22]
+    if len(payload) >= 27:
+        result["acquisition_period"] = Float32b.parse(payload[23:27])
+    if len(payload) >= 28:
+        result["properties"] = payload[27]
+    return result
+
+
+def parse_cmd79(payload: bytes) -> dict:
+    """Parse Command 79 (Write Device Variable) response.
+
+    Format (8 bytes, hipflowapp cmd_79.h insert_Data)::
+
+        Byte 0:     device_variable_code
+        Byte 1:     write_dv_command_code (0=Normal, 1=Fixed/Simulated)
+        Byte 2:     simulation_units_code
+        Bytes 3-6:  simulation_value (float)
+        Byte 7:     device_family
+    """
+    if len(payload) < 8:
+        return {}
+    return {
+        "device_variable_code": payload[0],
+        "write_dv_command_code": payload[1],
+        "simulation_units_code": payload[2],
+        "simulation_unit_name": get_unit_name(payload[2]),
+        "simulation_value": Float32b.parse(payload[3:7]),
+        "device_family": payload[7],
+    }
+
+
+def parse_cmd90(payload: bytes) -> dict:
+    """Parse Command 90 (Read Device & Message Timing) response.
+
+    Format (15 bytes, hipflowapp cmd_90.h insert_Data)::
+
+        Byte 0:     device_date_day
+        Byte 1:     device_date_month
+        Byte 2:     device_date_year (years since 1900)
+        Bytes 3-6:  device_timestamp (uint32, 1/32 ms)
+        Byte 7:     last_received_date_day
+        Byte 8:     last_received_date_month
+        Byte 9:     last_received_date_year
+        Bytes 10-13: last_received_timestamp (uint32, 1/32 ms)
+        Byte 14:    rtc_flags
+    """
+    if len(payload) < 15:
+        return {}
+    return {
+        "device_date_day": payload[0],
+        "device_date_month": payload[1],
+        "device_date_year": payload[2],
+        "device_timestamp": Int32ub.parse(payload[3:7]),
+        "last_received_date_day": payload[7],
+        "last_received_date_month": payload[8],
+        "last_received_date_year": payload[9],
+        "last_received_timestamp": Int32ub.parse(payload[10:14]),
+        "rtc_flags": payload[14],
+    }
+
+
+def parse_cmd95(payload: bytes) -> dict:
+    """Parse Command 95 (Read Device Message Statistics) response.
+
+    Format (6 bytes, hipflowapp cmd_95.h insert_Data)::
+
+        Bytes 0-1: stx_count (uint16, messages transmitted)
+        Bytes 2-3: ack_count (uint16, ACKs received)
+        Bytes 4-5: nak_count (uint16, back-offs/NAKs)
+    """
+    if len(payload) < 6:
+        return {}
+    return {
+        "stx_count": Int16ub.parse(payload[0:2]),
+        "ack_count": Int16ub.parse(payload[2:4]),
+        "nak_count": Int16ub.parse(payload[4:6]),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Burst message command parsers (Commands 103-109)
+# ---------------------------------------------------------------------------
+
+
+def parse_cmd103(payload: bytes) -> dict:
+    """Parse Command 103 (Write Burst Period) response.
+
+    Format (9 bytes, hipflowapp cmd_c103.h insert_Data)::
+
+        Byte 0:     burst_message_number
+        Bytes 1-4:  burst_comm_period (uint32, 1/32 ms)
+        Bytes 5-8:  max_burst_comm_period (uint32, 1/32 ms)
+    """
+    if len(payload) < 9:
+        return {}
+    return {
+        "burst_message_number": payload[0],
+        "burst_comm_period": Int32ub.parse(payload[1:5]),
+        "max_burst_comm_period": Int32ub.parse(payload[5:9]),
+    }
+
+
+def parse_cmd104(payload: bytes) -> dict:
+    """Parse Command 104 (Write Burst Trigger) response.
+
+    Format (8 bytes, hipflowapp cmd_c104.h insert_Data)::
+
+        Byte 0:     burst_message_number
+        Byte 1:     trigger_mode (0=Continuous, 1=Window, 2=Rising, 3=Falling, 4=On-Change)
+        Byte 2:     trigger_classification
+        Byte 3:     trigger_units_code
+        Bytes 4-7:  trigger_value (float)
+    """
+    if len(payload) < 8:
+        return {}
+    return {
+        "burst_message_number": payload[0],
+        "trigger_mode": payload[1],
+        "trigger_classification": payload[2],
+        "trigger_units_code": payload[3],
+        "trigger_unit_name": get_unit_name(payload[3]),
+        "trigger_value": Float32b.parse(payload[4:8]),
+    }
+
+
+def parse_cmd105(payload: bytes) -> dict:
+    """Parse Command 105 (Read Burst Mode Configuration) response.
+
+    Format (29 bytes non-legacy, hipflowapp cmd_c105.h insert_Data)::
+
+        Byte 0:      burst_mode_control
+        Byte 1:      command_number_legacy (or 31 for non-legacy)
+        Bytes 2-9:   device_variable_index_list (8 bytes)
+        Byte 10:     burst_message_number
+        Byte 11:     max_burst_messages
+        Bytes 12-13: command_number (uint16)
+        Bytes 14-17: burst_comm_period (uint32, 1/32 ms)
+        Bytes 18-21: max_burst_comm_period (uint32, 1/32 ms)
+        Byte 22:     trigger_mode
+        Byte 23:     trigger_classification
+        Byte 24:     trigger_units_code
+        Bytes 25-28: trigger_value (float)
+    """
+    if len(payload) < 2:
+        return {}
+    result: dict = {
+        "burst_mode_control": payload[0],
+        "command_number_legacy": payload[1],
+    }
+    if len(payload) >= 10:
+        result["device_variable_index_list"] = list(payload[2:10])
+    if len(payload) >= 12:
+        result["burst_message_number"] = payload[10]
+        result["max_burst_messages"] = payload[11]
+    if len(payload) >= 14:
+        result["command_number"] = Int16ub.parse(payload[12:14])
+    if len(payload) >= 18:
+        result["burst_comm_period"] = Int32ub.parse(payload[14:18])
+    if len(payload) >= 22:
+        result["max_burst_comm_period"] = Int32ub.parse(payload[18:22])
+    if len(payload) >= 23:
+        result["trigger_mode"] = payload[22]
+    if len(payload) >= 24:
+        result["trigger_classification"] = payload[23]
+    if len(payload) >= 25:
+        result["trigger_units_code"] = payload[24]
+        result["trigger_unit_name"] = get_unit_name(payload[24])
+    if len(payload) >= 29:
+        result["trigger_value"] = Float32b.parse(payload[25:29])
+    return result
+
+
+def parse_cmd107(payload: bytes) -> dict:
+    """Parse Command 107 (Write Burst Device Variables) response.
+
+    Format (9 bytes, hipflowapp cmd_c107.h insert_Data)::
+
+        Bytes 0-7: device_variable_index_list (8 bytes, 250=Not Used)
+        Byte 8:    burst_message_number
+    """
+    if len(payload) < 9:
+        return {}
+    return {
+        "device_variable_index_list": list(payload[0:8]),
+        "burst_message_number": payload[8],
+    }
+
+
+def parse_cmd108(payload: bytes) -> dict:
+    """Parse Command 108 (Write Burst Command Number) response.
+
+    Format (hipflowapp cmd_c108.h insert_Data):
+      Legacy (1 byte):     command_number(1)
+      Non-legacy (3 bytes): command_number(2 uint16) + burst_message_number(1)
+    """
+    if len(payload) < 1:
+        return {}
+    if len(payload) < 3:
+        # Legacy: single-byte command number
+        return {"command_number": payload[0]}
+    return {
+        "command_number": Int16ub.parse(payload[0:2]),
+        "burst_message_number": payload[2],
+    }
+
+
+def parse_cmd109(payload: bytes) -> dict:
+    """Parse Command 109 (Burst Mode Control) response.
+
+    Format (hipflowapp cmd_c109.h insert_Data):
+      Legacy (1 byte):     burst_mode_control(1)
+      Non-legacy (2 bytes): burst_mode_control(1) + burst_message_number(1)
+    """
+    if len(payload) < 1:
+        return {}
+    result: dict = {"burst_mode_control": payload[0]}
+    if len(payload) >= 2:
+        result["burst_message_number"] = payload[1]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Device-specific command parsers
+# ---------------------------------------------------------------------------
+
+
+def parse_cmd512(payload: bytes) -> dict:
+    """Parse Command 512 (Read Country & SI Unit Code) response.
+
+    Format (2 bytes, hipflowapp cmd_c512.h insert_Data)::
+
+        Byte 0: country_code
+        Byte 1: si_units_code
+    """
+    if len(payload) < 2:
+        return {}
+    return {
+        "country_code": payload[0],
+        "si_units_code": payload[1],
+    }
+
+
+# Command 513 (Write Country & SI Unit Code) response is identical to 512
+parse_cmd513 = parse_cmd512
+
+
+def parse_cmd534(payload: bytes) -> dict:
+    """Parse Command 534 (Read Device Variable Simulation Status) response.
+
+    Format (8 bytes, hipflowapp cmd_c534.h insert_Data)::
+
+        Byte 0:     device_variable_code
+        Byte 1:     write_dv_command_code (0=Normal, 1=Fixed/Simulated)
+        Byte 2:     simulation_units_code (250=Not Used when normal)
+        Bytes 3-6:  simulation_value (float, NaN when normal)
+        Byte 7:     device_family
+    """
+    if len(payload) < 8:
+        return {}
+    return {
+        "device_variable_code": payload[0],
+        "write_dv_command_code": payload[1],
+        "simulation_units_code": payload[2],
+        "simulation_unit_name": get_unit_name(payload[2]),
+        "simulation_value": Float32b.parse(payload[3:7]),
+        "device_family": payload[7],
+    }
