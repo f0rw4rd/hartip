@@ -1125,6 +1125,51 @@ class HARTIPClient:
         """Command 41: Perform Device Self-Test."""
         return self.send_command(HARTCommand.PERFORM_SELF_TEST, address, unique_addr=unique_addr)
 
+    def lock_device(
+        self,
+        lock_code: int = 1,
+        address: int = 0,
+        *,
+        unique_addr: bytes | None = None,
+    ) -> HARTIPResponse:
+        """Command 71: Lock Device.
+
+        Args:
+            lock_code: Lock code (0=Unlock, 1=Lock Temporary,
+                2=Lock Permanent, 3=Lock All).
+            address: Polling address for the request frame.
+            unique_addr: Explicit 5-byte unique address for long frame.
+        """
+        data = bytes([lock_code & 0xFF])
+        return self.send_command(
+            HARTCommand.LOCK_DEVICE,
+            address,
+            data=data,
+            unique_addr=unique_addr,
+        )
+
+    def unlock_device(
+        self,
+        address: int = 0,
+        *,
+        unique_addr: bytes | None = None,
+    ) -> HARTIPResponse:
+        """Command 71: Unlock Device (convenience for lock_device with code 0).
+
+        Args:
+            address: Polling address for the request frame.
+            unique_addr: Explicit 5-byte unique address for long frame.
+        """
+        return self.lock_device(lock_code=0, address=address, unique_addr=unique_addr)
+
+    def read_lock_state(
+        self, address: int = 0, *, unique_addr: bytes | None = None
+    ) -> HARTIPResponse:
+        """Command 76: Read Lock Device State."""
+        return self.send_command(
+            HARTCommand.READ_LOCK_DEVICE_STATE, address, unique_addr=unique_addr
+        )
+
     # -- v2 convenience wrappers (msg_id=4, msg_id=5) -----------------------
 
     def send_direct_pdu(

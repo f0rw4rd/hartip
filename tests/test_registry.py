@@ -146,8 +146,8 @@ class TestCommandRegistry:
             assert isinstance(entry[1], str), f"Command {cmd}: name not str"
 
     def test_registry_count(self) -> None:
-        # 40 registered commands
-        assert len(COMMAND_REGISTRY) == 40
+        # 42 registered commands (40 original + cmd71 + cmd76)
+        assert len(COMMAND_REGISTRY) == 42
 
 
 # ---------------------------------------------------------------------------
