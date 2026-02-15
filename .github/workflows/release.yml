@@ -172,7 +172,7 @@ jobs:
       attestations: write  # Required to persist attestations
       contents: read
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: dist
           path: dist/
@@ -200,7 +200,7 @@ jobs:
       name: pypi  # Requires approval — configure reviewers in GitHub settings
       url: https://pypi.org/project/hartip-py/
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: dist
           path: dist/
@@ -239,7 +239,7 @@ jobs:
     permissions:
       contents: write  # Required to create releases and upload assets
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: dist
           path: dist/
