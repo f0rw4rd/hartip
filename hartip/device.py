@@ -91,6 +91,76 @@ class DeviceInfo:
         if not self.manufacturer_name:
             self.manufacturer_name = get_vendor_name(self.manufacturer_id)
 
+    @property
+    def write_protected(self) -> bool:
+        """True when bit 7 of the flags byte is set (device is write-protected)."""
+        return bool(self.flags & 0x80)
+
+    @property
+    def config_changed(self) -> bool:
+        """True when bit 6 of the flags byte is set (configuration changed)."""
+        return bool(self.flags & 0x40)
+
+    @property
+    def physical_signaling_name(self) -> str:
+        """Human-readable name for the physical signaling code."""
+        return get_physical_signaling_name(self.physical_signaling)
+
+
+# ---------------------------------------------------------------------------
+# Physical signaling code lookup
+# ---------------------------------------------------------------------------
+
+PHYSICAL_SIGNALING_CODES: dict[int, str] = {
+    0: "Bell 202 FSK",
+    2: "FSK",
+    4: "WirelessHART",
+}
+
+
+def get_physical_signaling_name(code: int) -> str:
+    """Return a human-readable name for a physical signaling code.
+
+    Args:
+        code: Physical signaling code from Command 0 byte 7 (lower 3 bits).
+
+    Returns:
+        Name string, or ``"Unknown"`` if the code is not recognized.
+    """
+    return PHYSICAL_SIGNALING_CODES.get(code, "Unknown")
+
+
+# ---------------------------------------------------------------------------
+# Device type code lookup
+# ---------------------------------------------------------------------------
+
+#: Maps device type code ranges to descriptive names.
+_DEVICE_TYPE_RANGES: list[tuple[int, int, str]] = [
+    (40, 49, "Pressure Transmitter"),
+    (50, 59, "Temperature Transmitter"),
+    (60, 69, "Flow Meter"),
+    (70, 79, "Level Transmitter"),
+    (80, 94, "Gateway / Interface"),
+]
+
+
+def get_device_type_name(code: int) -> str:
+    """Return a descriptive name for a HART device type code.
+
+    The ranges are based on the FieldComm Group device type code
+    allocation guidelines.
+
+    Args:
+        code: Device type code (from Command 0 byte 2).
+
+    Returns:
+        Descriptive name, or ``"Unknown"`` if outside known ranges.
+    """
+    for low, high, name in _DEVICE_TYPE_RANGES:
+        if low <= code <= high:
+            return name
+    return "Unknown"
+
 
 # ---------------------------------------------------------------------------
 # Communication error flag utilities
@@ -743,6 +813,51 @@ def parse_cmd54(payload: bytes) -> dict:
     return result
 
 
+def parse_cmd71(payload: bytes) -> dict:
+    """Parse Command 71 (Lock Device) response.
+
+    Command 71 is used to lock or unlock a HART device. Both the request
+    and response carry a single byte -- the lock code.
+
+    Format (1 byte, CISAGOV Spicy ``LockDevice``)::
+
+        Byte 0: lock_code
+                  0 = Unlock
+                  1 = Lock (Temporary)
+                  2 = Lock (Permanent)
+                  3 = Lock All
+    """
+    if len(payload) < 1:
+        return {}
+    return {"lock_code": payload[0]}
+
+
+def parse_cmd76(payload: bytes) -> dict:
+    """Parse Command 76 (Read Lock Device State) response.
+
+    Format (1 byte, CISAGOV Spicy ``ReadLockDeviceStateResponse``)::
+
+        Byte 0: lock_status (bitfield)
+                  bit 0: device_locked
+                  bit 1: lock_permanent
+                  bit 2: lock_primary
+                  bit 3: configuration_locked
+                  bit 4: lock_gateway
+                  bits 5-7: reserved
+    """
+    if len(payload) < 1:
+        return {}
+    status = payload[0]
+    return {
+        "lock_status": status,
+        "device_locked": bool(status & 0x01),
+        "lock_permanent": bool(status & 0x02),
+        "lock_primary": bool(status & 0x04),
+        "configuration_locked": bool(status & 0x08),
+        "lock_gateway": bool(status & 0x10),
+    }
+
+
 def parse_cmd79(payload: bytes) -> dict:
     """Parse Command 79 (Write Device Variable) response.
 
@@ -1040,6 +1155,8 @@ COMMAND_REGISTRY: dict[int, tuple] = {
     52: (parse_cmd52, "set_device_variable_zero"),
     53: (parse_cmd53, "write_device_variable_units"),
     54: (parse_cmd54, "read_device_variable_info"),
+    71: (parse_cmd71, "lock_device"),
+    76: (parse_cmd76, "read_lock_device_state"),
     79: (parse_cmd79, "write_device_variable"),
     90: (parse_cmd90, "read_device_message_timing"),
     95: (parse_cmd95, "read_device_message_statistics"),
@@ -1132,6 +1249,8 @@ parse_additional_device_status = parse_cmd48
 parse_set_device_variable_zero = parse_cmd52
 parse_device_variable_units = parse_cmd53
 parse_device_variable_info = parse_cmd54
+parse_lock_device = parse_cmd71
+parse_lock_device_state = parse_cmd76
 parse_write_device_variable = parse_cmd79
 parse_device_message_timing = parse_cmd90
 parse_device_message_statistics = parse_cmd95

@@ -59,6 +59,7 @@ from .constants import (
 from .device import (
     # Registry and dispatch
     COMMAND_REGISTRY,
+    PHYSICAL_SIGNALING_CODES,
     # Dataclasses
     DeviceInfo,
     DeviceVariable,
@@ -66,7 +67,9 @@ from .device import (
     # Utilities
     decode_comm_error_flags,
     get_command_name,
+    get_device_type_name,
     get_parser,
+    get_physical_signaling_name,
     is_comm_error,
     parse_additional_device_status,
     parse_burst_command_number,
@@ -104,6 +107,8 @@ from .device import (
     parse_cmd52,
     parse_cmd53,
     parse_cmd54,
+    parse_cmd71,
+    parse_cmd76,
     parse_cmd79,
     parse_cmd90,
     parse_cmd95,
@@ -129,6 +134,8 @@ from .device import (
     parse_dynamic_variable_classifications,
     parse_dynamic_variables,
     parse_final_assembly_number,
+    parse_lock_device,
+    parse_lock_device_state,
     parse_long_tag,
     parse_loop_configuration,
     parse_message,
@@ -244,6 +251,9 @@ __all__ = [
     "DeviceInfo",
     "DeviceVariable",
     "Variable",
+    "PHYSICAL_SIGNALING_CODES",
+    "get_device_type_name",
+    "get_physical_signaling_name",
     "is_comm_error",
     "decode_comm_error_flags",
     # parse_cmdNN (backward compatible)
@@ -275,6 +285,8 @@ __all__ = [
     "parse_cmd52",
     "parse_cmd53",
     "parse_cmd54",
+    "parse_cmd71",
+    "parse_cmd76",
     "parse_cmd79",
     "parse_cmd90",
     "parse_cmd95",
@@ -311,6 +323,8 @@ __all__ = [
     "parse_set_device_variable_zero",
     "parse_device_variable_units",
     "parse_device_variable_info",
+    "parse_lock_device",
+    "parse_lock_device_state",
     "parse_write_device_variable",
     "parse_device_message_timing",
     "parse_device_message_statistics",

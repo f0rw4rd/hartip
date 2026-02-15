@@ -31,6 +31,9 @@ DeviceInfo.tag
 DeviceInfo.descriptor
 DeviceInfo.date
 DeviceInfo.long_tag
+DeviceInfo.write_protected
+DeviceInfo.config_changed
+DeviceInfo.physical_signaling_name
 
 Variable.value
 Variable.unit_code
@@ -69,6 +72,9 @@ HARTIPClient.write_final_assembly
 HARTIPClient.read_long_tag
 HARTIPClient.read_additional_status
 HARTIPClient.perform_self_test
+HARTIPClient.lock_device
+HARTIPClient.unlock_device
+HARTIPClient.read_lock_state
 HARTIPClient.send_direct_pdu
 HARTIPClient.read_audit_log
 HARTIPClient.psk_identity
