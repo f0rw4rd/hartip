@@ -2,9 +2,8 @@
 
 import struct
 
-import pytest
-
 from hartip.ascii import pack_ascii
+from hartip.constants import HARTCommErrorFlags
 from hartip.device import (
     DeviceInfo,
     DeviceVariable,
@@ -23,8 +22,6 @@ from hartip.device import (
     parse_cmd20,
     parse_cmd48,
 )
-from hartip.constants import HARTCommErrorFlags
-
 
 # ---------------------------------------------------------------------------
 # Variable / DeviceInfo dataclasses
@@ -48,8 +45,13 @@ class TestVariable:
 class TestDeviceVariable:
     def test_fields(self) -> None:
         dv = DeviceVariable(
-            slot=0, device_var_code=1, classification=64,
-            unit_code=7, unit_name="bar", value=1.5, status=0,
+            slot=0,
+            device_var_code=1,
+            classification=64,
+            unit_code=7,
+            unit_name="bar",
+            value=1.5,
+            status=0,
         )
         assert dv.slot == 0
         assert dv.device_var_code == 1
@@ -135,18 +137,22 @@ class TestCommError:
 
 class TestParseCmd0:
     def test_legacy_12_byte(self) -> None:
-        payload = bytes([
-            0x00,  # expansion code
-            0x26,  # manufacturer_id = Rosemount
-            0x01,  # device_type
-            0x05,  # num_preambles
-            0x05,  # hart_revision
-            0x03,  # device_revision
-            0x02,  # software_revision
-            0x10,  # hardware_revision(5b) | physical_signaling(3b)
-            0x00,  # flags
-            0x01, 0x02, 0x03,  # device_id (24-bit)
-        ])
+        payload = bytes(
+            [
+                0x00,  # expansion code
+                0x26,  # manufacturer_id = Rosemount
+                0x01,  # device_type
+                0x05,  # num_preambles
+                0x05,  # hart_revision
+                0x03,  # device_revision
+                0x02,  # software_revision
+                0x10,  # hardware_revision(5b) | physical_signaling(3b)
+                0x00,  # flags
+                0x01,
+                0x02,
+                0x03,  # device_id (24-bit)
+            ]
+        )
         info = parse_cmd0(payload)
         assert info.manufacturer_id == 0x26
         assert "Rosemount" in info.manufacturer_name
@@ -160,10 +166,22 @@ class TestParseCmd0:
         assert info.num_preambles == 5
 
     def test_unique_address(self) -> None:
-        payload = bytes([
-            0x00, 0x26, 0x01, 0x05, 0x05, 0x03, 0x02, 0x10,
-            0x00, 0x01, 0x02, 0x03,
-        ])
+        payload = bytes(
+            [
+                0x00,
+                0x26,
+                0x01,
+                0x05,
+                0x05,
+                0x03,
+                0x02,
+                0x10,
+                0x00,
+                0x01,
+                0x02,
+                0x03,
+            ]
+        )
         info = parse_cmd0(payload)
         assert len(info.unique_address) == 5
         assert info.unique_address[0] == 0x80 | (0x26 & 0x3F)
@@ -173,29 +191,59 @@ class TestParseCmd0:
         assert info.unique_address[4] == 0x03
 
     def test_extended_fields(self) -> None:
-        payload = bytes([
-            0x00, 0x03, 0x02, 0x05, 0x07, 0x10, 0x05, 0x28,
-            0x00, 0x00, 0xAB, 0xCD,
-            0x05,        # num_response_preambles
-            0x03,        # max_device_vars
-            0x00, 0x01,  # config_change_counter
-            0x00,        # extended_field_device_status
-        ])
+        payload = bytes(
+            [
+                0x00,
+                0x03,
+                0x02,
+                0x05,
+                0x07,
+                0x10,
+                0x05,
+                0x28,
+                0x00,
+                0x00,
+                0xAB,
+                0xCD,
+                0x05,  # num_response_preambles
+                0x03,  # max_device_vars
+                0x00,
+                0x01,  # config_change_counter
+                0x00,  # extended_field_device_status
+            ]
+        )
         info = parse_cmd0(payload)
         assert info.num_response_preambles == 5
         assert info.config_change_counter == 1
         assert info.extended_field_device_status == 0
 
     def test_hart7_extended(self) -> None:
-        payload = bytes([
-            254,  # expansion code (HART 7)
-            0x03, 0x02, 0x05, 0x07, 0x10, 0x05, 0x28,
-            0x00, 0x00, 0xAB, 0xCD,
-            0x05, 0x03, 0x00, 0x01, 0x00,
-            0x00, 0x03,  # manufacturer_id_16bit
-            0x00, 0x10,  # private_label
-            0x05,        # device_profile
-        ])
+        payload = bytes(
+            [
+                254,  # expansion code (HART 7)
+                0x03,
+                0x02,
+                0x05,
+                0x07,
+                0x10,
+                0x05,
+                0x28,
+                0x00,
+                0x00,
+                0xAB,
+                0xCD,
+                0x05,
+                0x03,
+                0x00,
+                0x01,
+                0x00,
+                0x00,
+                0x03,  # manufacturer_id_16bit
+                0x00,
+                0x10,  # private_label
+                0x05,  # device_profile
+            ]
+        )
         info = parse_cmd0(payload)
         assert info.manufacturer_id == 3
         assert info.device_id == 0x00ABCD
@@ -422,8 +470,8 @@ class TestParseCmd15:
     def test_valid(self) -> None:
         payload = bytes([0x00, 0x00, 0x07])  # alarm, transfer, range_units=bar
         payload += struct.pack(">f", 100.0)  # upper
-        payload += struct.pack(">f", 0.0)    # lower
-        payload += struct.pack(">f", 2.0)    # damping
+        payload += struct.pack(">f", 0.0)  # lower
+        payload += struct.pack(">f", 2.0)  # damping
         payload += bytes([0xFB, 0xFA, 0x00])  # write_protect, reserved, channel_flags
         result = parse_cmd15(payload)
         assert result["alarm_selection_code"] == 0

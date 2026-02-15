@@ -19,7 +19,6 @@ from typing import List, Optional, Sequence
 from construct import Int16ub, Int32ub, Int64ub
 
 from .constants import (
-    AUDIT_LOG_REQUEST_SIZE,
     DIRECT_PDU_CMD_HEADER_SIZE,
     DIRECT_PDU_HEADER_SIZE,
     HARTIP_HEADER_SIZE,
@@ -31,7 +30,6 @@ from .constants import (
     HARTIPVersion,
 )
 from .protocol import HARTIPHeader
-
 
 # ---------------------------------------------------------------------------
 # Direct PDU (msg_id=4) -- TP10300 Section 10.3.2.5
@@ -85,11 +83,7 @@ class DirectPDUCommand:
                 f"Direct PDU command {self.command_number}: "
                 f"data length {len(self.data)} exceeds 255"
             )
-        return (
-            Int16ub.build(self.command_number)
-            + bytes([len(self.data)])
-            + self.data
-        )
+        return Int16ub.build(self.command_number) + bytes([len(self.data)]) + self.data
 
     def encode_response(self) -> bytes:
         """Encode as a Direct PDU response command entry."""
@@ -100,11 +94,7 @@ class DirectPDUCommand:
                 f"Direct PDU command {self.command_number}: "
                 f"response payload length {len(payload)} exceeds 255"
             )
-        return (
-            Int16ub.build(self.command_number)
-            + bytes([len(payload)])
-            + payload
-        )
+        return Int16ub.build(self.command_number) + bytes([len(payload)]) + payload
 
 
 @dataclass
@@ -167,14 +157,14 @@ def build_direct_pdu_request(
 
     total_len = HARTIP_HEADER_SIZE + len(payload)
     header = HARTIPHeader.build(
-        dict(
-            version=version,
-            msg_type=HARTIPMessageType.REQUEST,
-            msg_id=HARTIPMessageID.DIRECT_PDU,
-            status=0,
-            sequence=sequence & 0xFFFF,
-            byte_count=total_len,
-        )
+        {
+            "version": version,
+            "msg_type": HARTIPMessageType.REQUEST,
+            "msg_id": HARTIPMessageID.DIRECT_PDU,
+            "status": 0,
+            "sequence": sequence & 0xFFFF,
+            "byte_count": total_len,
+        }
     )
     return header + payload
 
@@ -409,14 +399,14 @@ def build_audit_log_request(
     payload = bytes([start_record, number_of_records])
     total_len = HARTIP_HEADER_SIZE + len(payload)
     header = HARTIPHeader.build(
-        dict(
-            version=version,
-            msg_type=HARTIPMessageType.REQUEST,
-            msg_id=HARTIPMessageID.READ_AUDIT_LOG,
-            status=0,
-            sequence=sequence & 0xFFFF,
-            byte_count=total_len,
-        )
+        {
+            "version": version,
+            "msg_type": HARTIPMessageType.REQUEST,
+            "msg_id": HARTIPMessageID.READ_AUDIT_LOG,
+            "status": 0,
+            "sequence": sequence & 0xFFFF,
+            "byte_count": total_len,
+        }
     )
     return header + payload
 
@@ -481,8 +471,7 @@ def _parse_session_log_record(data: bytes) -> SessionLogRecord:
     """
     if len(data) < SESSION_LOG_RECORD_SIZE:
         raise ValueError(
-            f"Session log record too short: {len(data)} bytes, "
-            f"need {SESSION_LOG_RECORD_SIZE}"
+            f"Session log record too short: {len(data)} bytes, need {SESSION_LOG_RECORD_SIZE}"
         )
 
     ipv4_bytes = data[0:4]

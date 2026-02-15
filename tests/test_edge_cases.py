@@ -11,26 +11,20 @@ from __future__ import annotations
 import math
 import struct
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from hartip.ascii import _6bit_to_ascii, _ascii_to_6bit, pack_ascii, unpack_ascii
 from hartip.client import HARTIPClient, HARTIPResponse
 from hartip.constants import (
-    COMM_ERROR_MASK,
     DR_RETRY_CODES,
-    HARTIP_HEADER_SIZE,
-    HARTCommand,
     HARTFrameType,
     HARTIPMessageID,
-    HARTIPMessageType,
-    HARTIPStatus,
     HARTResponseCode,
 )
 from hartip.device import (
     DeviceInfo,
-    DeviceVariable,
     Variable,
     decode_comm_error_flags,
     is_comm_error,
@@ -87,7 +81,6 @@ from hartip.exceptions import (
 )
 from hartip.protocol import (
     HARTIPHeader,
-    HARTPdu,
     PduContainer,
     build_keep_alive,
     build_pdu,
@@ -112,7 +105,6 @@ from hartip.v2 import (
 )
 from hartip.vendors import MANUFACTURERS, get_vendor_name
 
-
 # ===================================================================
 # 1. Protocol parsing edge cases
 # ===================================================================
@@ -135,17 +127,31 @@ class TestTruncatedPackets:
 
     def test_header_exactly_8_bytes_no_payload(self):
         """8-byte header with byte_count=8 (header only) is valid."""
-        raw = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=0, status=0, sequence=1, byte_count=8,
-        ))
+        raw = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=0,
+                status=0,
+                sequence=1,
+                byte_count=8,
+            )
+        )
         result = parse_response(raw)
         assert result["pdu"] is None
 
     def test_header_claims_payload_but_truncated(self):
         """byte_count says 20 but only 8 bytes present."""
-        raw = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=3, status=0, sequence=1, byte_count=20,
-        ))
+        raw = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=3,
+                status=0,
+                sequence=1,
+                byte_count=20,
+            )
+        )
         with pytest.raises(ValueError, match="truncated"):
             parse_response(raw)
 
@@ -190,7 +196,7 @@ class TestTruncatedPackets:
         # 0x42 = 0b01000010 → (0x42 >> 5) & 0x03 = 2
         # Actually 0x42 >> 5 = 2, & 0x03 = 2 expansion bytes
         # Short frame (bit 7=0), 1-byte address, 2 expansion, cmd, bc, cksum
-        data = b"\x42\x00\xAA\xBB\x01\x00\x00"
+        data = b"\x42\x00\xaa\xbb\x01\x00\x00"
         pdu = parse_pdu(data)
         assert pdu.expansion_bytes == b"\xaa\xbb"
         assert pdu.command == 1
@@ -198,7 +204,7 @@ class TestTruncatedPackets:
     def test_pdu_expansion_bytes_truncated(self):
         """Delimiter says 2 expansion bytes but only 1 present."""
         with pytest.raises(ValueError, match="expansion bytes"):
-            parse_pdu(b"\x42\x00\xAA")
+            parse_pdu(b"\x42\x00\xaa")
 
 
 class TestChecksumValidation:
@@ -223,7 +229,7 @@ class TestChecksumValidation:
         assert xor_checksum(pdu_bytes) == 0
 
     def test_build_pdu_checksum_with_data(self):
-        pdu_bytes = build_pdu(0x02, b"\x00", 1, b"\xAA\xBB\xCC")
+        pdu_bytes = build_pdu(0x02, b"\x00", 1, b"\xaa\xbb\xcc")
         assert xor_checksum(pdu_bytes) == 0
 
     def test_checksum_mismatch_detected_by_client(self):
@@ -233,10 +239,16 @@ class TestChecksumValidation:
         # Corrupt last byte (checksum)
         pdu_bad = pdu[:-1] + bytes([(pdu[-1] ^ 0xFF)])
 
-        header = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=3, status=0,
-            sequence=1, byte_count=8 + len(pdu_bad),
-        ))
+        header = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=3,
+                status=0,
+                sequence=1,
+                byte_count=8 + len(pdu_bad),
+            )
+        )
         raw = header + pdu_bad
 
         client = HARTIPClient("127.0.0.1")
@@ -249,33 +261,61 @@ class TestHeaderByteCount:
 
     def test_byte_count_zero(self):
         """byte_count=0 → payload_len=0 (clamped by max(0, ...))."""
-        raw = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=0, status=0, sequence=0, byte_count=0,
-        ))
+        raw = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=0,
+                status=0,
+                sequence=0,
+                byte_count=0,
+            )
+        )
         header = HARTIPHeader.parse(raw)
         assert header.payload_len == 0
 
     def test_byte_count_less_than_header(self):
         """byte_count=4 (less than 8) → payload_len clamped to 0."""
-        raw = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=0, status=0, sequence=0, byte_count=4,
-        ))
+        raw = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=0,
+                status=0,
+                sequence=0,
+                byte_count=4,
+            )
+        )
         header = HARTIPHeader.parse(raw)
         assert header.payload_len == 0
 
     def test_byte_count_exactly_header(self):
         """byte_count=8 → payload_len=0."""
-        raw = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=0, status=0, sequence=0, byte_count=8,
-        ))
+        raw = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=0,
+                status=0,
+                sequence=0,
+                byte_count=8,
+            )
+        )
         result = parse_response(raw)
         assert result["pdu"] is None
 
     def test_byte_count_max_uint16(self):
         """byte_count=65535 → payload_len=65527."""
-        raw = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=3, status=0, sequence=0, byte_count=0xFFFF,
-        ))
+        raw = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=3,
+                status=0,
+                sequence=0,
+                byte_count=0xFFFF,
+            )
+        )
         header = HARTIPHeader.parse(raw)
         assert header.payload_len == 0xFFFF - 8
 
@@ -366,10 +406,16 @@ class TestClientParsing:
         frame_no_cksum = bytes([delimiter]) + addr + bytes([cmd, len(pdu_data)]) + pdu_data
         cksum = xor_checksum(frame_no_cksum)
         pdu = frame_no_cksum + bytes([cksum])
-        header = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=3, status=status,
-            sequence=1, byte_count=8 + len(pdu),
-        ))
+        header = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=3,
+                status=status,
+                sequence=1,
+                byte_count=8 + len(pdu),
+            )
+        )
         return header + pdu
 
     def test_non_success_status_raises(self):
@@ -388,9 +434,16 @@ class TestClientParsing:
 
     def test_header_only_response(self):
         """Response with byte_count=8 (no PDU) returns pdu=None."""
-        header = HARTIPHeader.build(dict(
-            version=1, msg_type=1, msg_id=0, status=0, sequence=1, byte_count=8,
-        ))
+        header = HARTIPHeader.build(
+            dict(
+                version=1,
+                msg_type=1,
+                msg_id=0,
+                status=0,
+                sequence=1,
+                byte_count=8,
+            )
+        )
         client = HARTIPClient("127.0.0.1")
         resp = client._parse(header)
         assert resp.pdu is None
@@ -425,7 +478,7 @@ class TestClientParsing:
 
     def test_comm_error_flag_detected(self):
         """MSB set in response code byte → comm_error=True."""
-        raw = self._make_response(pdu_data=b"\xC2\x00")
+        raw = self._make_response(pdu_data=b"\xc2\x00")
         client = HARTIPClient("127.0.0.1")
         resp = client._parse(raw)
         assert resp.comm_error is True
@@ -457,10 +510,16 @@ class TestClientAddressHandling:
             frames.append(frame)
             # Return a valid response
             pdu = build_pdu(0x06, b"\x00", 0, b"\x00\x00")
-            hdr = HARTIPHeader.build(dict(
-                version=1, msg_type=1, msg_id=3, status=0,
-                sequence=1, byte_count=8 + len(pdu),
-            ))
+            hdr = HARTIPHeader.build(
+                dict(
+                    version=1,
+                    msg_type=1,
+                    msg_id=3,
+                    status=0,
+                    sequence=1,
+                    byte_count=8 + len(pdu),
+                )
+            )
             return hdr + pdu
 
         client._send_recv_unlocked = capture
@@ -491,10 +550,16 @@ class TestClientAddressHandling:
         def capture(frame):
             frames.append(frame)
             pdu = build_pdu(0x86, b"\x80\x01\x00\x00\x01", 0, b"\x00\x00")
-            hdr = HARTIPHeader.build(dict(
-                version=1, msg_type=1, msg_id=3, status=0,
-                sequence=1, byte_count=8 + len(pdu),
-            ))
+            hdr = HARTIPHeader.build(
+                dict(
+                    version=1,
+                    msg_type=1,
+                    msg_id=3,
+                    status=0,
+                    sequence=1,
+                    byte_count=8 + len(pdu),
+                )
+            )
             return hdr + pdu
 
         client._send_recv_unlocked = capture
@@ -517,10 +582,16 @@ class TestClientAddressHandling:
         def capture(frame):
             frames.append(frame)
             pdu = build_pdu(0x86, b"\x80\x01\x00\x00\x01", 0, b"\x00\x00")
-            hdr = HARTIPHeader.build(dict(
-                version=1, msg_type=1, msg_id=3, status=0,
-                sequence=1, byte_count=8 + len(pdu),
-            ))
+            hdr = HARTIPHeader.build(
+                dict(
+                    version=1,
+                    msg_type=1,
+                    msg_id=3,
+                    status=0,
+                    sequence=1,
+                    byte_count=8 + len(pdu),
+                )
+            )
             return hdr + pdu
 
         client._send_recv_unlocked = capture
@@ -545,10 +616,16 @@ class TestExtendedCommands:
         def capture(frame):
             frames.append(frame)
             pdu = build_pdu(0x06, b"\x00", 31, b"\x00\x00")
-            hdr = HARTIPHeader.build(dict(
-                version=1, msg_type=1, msg_id=3, status=0,
-                sequence=1, byte_count=8 + len(pdu),
-            ))
+            hdr = HARTIPHeader.build(
+                dict(
+                    version=1,
+                    msg_type=1,
+                    msg_id=3,
+                    status=0,
+                    sequence=1,
+                    byte_count=8 + len(pdu),
+                )
+            )
             return hdr + pdu
 
         client._send_recv_unlocked = capture
@@ -571,10 +648,16 @@ class TestExtendedCommands:
         def capture(frame):
             frames.append(frame)
             pdu = build_pdu(0x06, b"\x00", 31, b"\x00\x00")
-            hdr = HARTIPHeader.build(dict(
-                version=1, msg_type=1, msg_id=3, status=0,
-                sequence=1, byte_count=8 + len(pdu),
-            ))
+            hdr = HARTIPHeader.build(
+                dict(
+                    version=1,
+                    msg_type=1,
+                    msg_id=3,
+                    status=0,
+                    sequence=1,
+                    byte_count=8 + len(pdu),
+                )
+            )
             return hdr + pdu
 
         client._send_recv_unlocked = capture
@@ -597,10 +680,16 @@ class TestExtendedCommands:
         def capture(frame):
             frames.append(frame)
             pdu = build_pdu(0x06, b"\x00", 253, b"\x00\x00")
-            hdr = HARTIPHeader.build(dict(
-                version=1, msg_type=1, msg_id=3, status=0,
-                sequence=1, byte_count=8 + len(pdu),
-            ))
+            hdr = HARTIPHeader.build(
+                dict(
+                    version=1,
+                    msg_type=1,
+                    msg_id=3,
+                    status=0,
+                    sequence=1,
+                    byte_count=8 + len(pdu),
+                )
+            )
             return hdr + pdu
 
         client._send_recv_unlocked = capture
@@ -714,8 +803,9 @@ class TestHARTIPResponseEdges:
 
     def test_raise_for_error_with_pdu(self):
         """raise_for_error extracts command from PDU if available."""
-        pdu = PduContainer(delimiter=0x06, address=b"\x00", command=48,
-                           byte_count=0, data=b"", checksum=0)
+        pdu = PduContainer(
+            delimiter=0x06, address=b"\x00", command=48, byte_count=0, data=b"", checksum=0
+        )
         resp = HARTIPResponse(header=None, pdu=pdu, response_code=16)
         with pytest.raises(HARTResponseError) as exc_info:
             resp.raise_for_error()
@@ -727,23 +817,27 @@ class TestHARTIPResponseEdges:
         assert "cmd=?" in repr(resp)
 
     def test_repr_with_pdu(self):
-        pdu = PduContainer(delimiter=0x06, address=b"\x00", command=1,
-                           byte_count=0, data=b"", checksum=0)
+        pdu = PduContainer(
+            delimiter=0x06, address=b"\x00", command=1, byte_count=0, data=b"", checksum=0
+        )
         resp = HARTIPResponse(header=None, pdu=pdu, response_code=0)
         assert "cmd=1" in repr(resp)
         assert "ok" in repr(resp)
 
-    @pytest.mark.parametrize("rc", [
-        HARTResponseCode.SUCCESS,
-        HARTResponseCode.UNDEFINED_COMMAND,
-        HARTResponseCode.TOO_FEW_DATA_BYTES,
-        HARTResponseCode.DEVICE_BUSY,
-        HARTResponseCode.IN_WRITE_PROTECT_MODE,
-        HARTResponseCode.CMD_NOT_IMPLEMENTED,
-        HARTResponseCode.ACCESS_RESTRICTED,
-        HARTResponseCode.DR_RUNNING,
-        HARTResponseCode.DR_DEAD,
-    ])
+    @pytest.mark.parametrize(
+        "rc",
+        [
+            HARTResponseCode.SUCCESS,
+            HARTResponseCode.UNDEFINED_COMMAND,
+            HARTResponseCode.TOO_FEW_DATA_BYTES,
+            HARTResponseCode.DEVICE_BUSY,
+            HARTResponseCode.IN_WRITE_PROTECT_MODE,
+            HARTResponseCode.CMD_NOT_IMPLEMENTED,
+            HARTResponseCode.ACCESS_RESTRICTED,
+            HARTResponseCode.DR_RUNNING,
+            HARTResponseCode.DR_DEAD,
+        ],
+    )
     def test_all_response_codes_handled(self, rc):
         """Every defined response code can be stored and reported."""
         resp = HARTIPResponse(header=None, pdu=None, response_code=rc)
@@ -775,6 +869,7 @@ class TestClientInitEdges:
 
     def test_ssl_context_psk_warns(self):
         import ssl
+
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         with pytest.warns(UserWarning, match="ssl_context.*psk"):
             HARTIPClient("host", ssl_context=ctx, psk_identity="id", psk_key=b"\x00")
@@ -810,18 +905,22 @@ class TestParseCmd0Edges:
         assert info.manufacturer_id == 0
 
     def test_exactly_12_bytes(self):
-        payload = bytes([
-            0xFE,  # expansion code
-            0x1A,  # manufacturer_id = 26
-            0x05,  # device_type
-            0x05,  # num_preambles
-            0x07,  # hart_revision
-            0x01,  # device_revision
-            0x03,  # software_revision
-            0x28,  # hw_rev=5, phys_sig=0
-            0x00,  # flags
-            0x00, 0x01, 0x00,  # device_id = 256
-        ])
+        payload = bytes(
+            [
+                0xFE,  # expansion code
+                0x1A,  # manufacturer_id = 26
+                0x05,  # device_type
+                0x05,  # num_preambles
+                0x07,  # hart_revision
+                0x01,  # device_revision
+                0x03,  # software_revision
+                0x28,  # hw_rev=5, phys_sig=0
+                0x00,  # flags
+                0x00,
+                0x01,
+                0x00,  # device_id = 256
+            ]
+        )
         info = parse_cmd0(payload)
         assert info.manufacturer_id == 0x1A
         assert info.device_type == 5
@@ -831,50 +930,108 @@ class TestParseCmd0Edges:
 
     def test_16_bytes_extended(self):
         """Payload with config_change_counter."""
-        payload = bytes([
-            0xFE, 0x1A, 0x05, 0x05, 0x07, 0x01, 0x03, 0x28,
-            0x00, 0x00, 0x01, 0x00,
-            0x05,  # num_response_preambles
-            0x04,  # max_device_vars
-            0x00, 0x0A,  # config_change_counter = 10
-        ])
+        payload = bytes(
+            [
+                0xFE,
+                0x1A,
+                0x05,
+                0x05,
+                0x07,
+                0x01,
+                0x03,
+                0x28,
+                0x00,
+                0x00,
+                0x01,
+                0x00,
+                0x05,  # num_response_preambles
+                0x04,  # max_device_vars
+                0x00,
+                0x0A,  # config_change_counter = 10
+            ]
+        )
         info = parse_cmd0(payload)
         assert info.config_change_counter == 10
         assert info.num_response_preambles == 5
 
     def test_19_bytes_hart7(self):
         """HART 7 with 16-bit manufacturer ID."""
-        payload = bytes([
-            0xFE, 0x1A, 0x05, 0x05, 0x07, 0x01, 0x03, 0x28,
-            0x00, 0x00, 0x01, 0x00,
-            0x05, 0x04, 0x00, 0x0A,
-            0x01,  # extended_field_device_status
-            0x60, 0x00,  # manufacturer_id_16bit = 0x6000
-        ])
+        payload = bytes(
+            [
+                0xFE,
+                0x1A,
+                0x05,
+                0x05,
+                0x07,
+                0x01,
+                0x03,
+                0x28,
+                0x00,
+                0x00,
+                0x01,
+                0x00,
+                0x05,
+                0x04,
+                0x00,
+                0x0A,
+                0x01,  # extended_field_device_status
+                0x60,
+                0x00,  # manufacturer_id_16bit = 0x6000
+            ]
+        )
         info = parse_cmd0(payload)
         assert info.manufacturer_id_16bit == 0x6000
 
     def test_22_bytes_full_hart7(self):
         """Full HART 7 with private_label and device_profile."""
-        payload = bytes([
-            0xFE, 0x1A, 0x05, 0x05, 0x07, 0x01, 0x03, 0x28,
-            0x00, 0x00, 0x01, 0x00,
-            0x05, 0x04, 0x00, 0x0A,
-            0x01,
-            0x60, 0x00,
-            0xAB, 0xCD,  # private_label
-            0x02,  # device_profile
-        ])
+        payload = bytes(
+            [
+                0xFE,
+                0x1A,
+                0x05,
+                0x05,
+                0x07,
+                0x01,
+                0x03,
+                0x28,
+                0x00,
+                0x00,
+                0x01,
+                0x00,
+                0x05,
+                0x04,
+                0x00,
+                0x0A,
+                0x01,
+                0x60,
+                0x00,
+                0xAB,
+                0xCD,  # private_label
+                0x02,  # device_profile
+            ]
+        )
         info = parse_cmd0(payload)
         assert info.private_label == 0xABCD
         assert info.device_profile == 2
 
     def test_unique_address_construction(self):
         """Unique address has 0x80 OR'd with manufacturer_id masked to 6 bits."""
-        payload = bytes([
-            0xFE, 0xFF, 0x05, 0x05, 0x07, 0x01, 0x03, 0x28,
-            0x00, 0x00, 0x00, 0x01,
-        ])
+        payload = bytes(
+            [
+                0xFE,
+                0xFF,
+                0x05,
+                0x05,
+                0x07,
+                0x01,
+                0x03,
+                0x28,
+                0x00,
+                0x00,
+                0x00,
+                0x01,
+            ]
+        )
         info = parse_cmd0(payload)
         # 0xFF & 0x3F = 0x3F, then 0x80 | 0x3F = 0xBF
         assert info.unique_address[0] == 0xBF
@@ -913,7 +1070,7 @@ class TestParseCmd1Edges:
 
     def test_extra_bytes_ignored(self):
         """Extra trailing bytes are harmless."""
-        payload = b"\x01" + struct.pack(">f", 25.5) + b"\xFF\xFF"
+        payload = b"\x01" + struct.pack(">f", 25.5) + b"\xff\xff"
         result = parse_cmd1(payload)
         assert result is not None
         assert abs(result.value - 25.5) < 0.01
@@ -1030,11 +1187,19 @@ class TestParseCmd13Edges:
         assert parse_cmd13(b"\x00" * 20) == {}
 
     def test_year_zero_empty_date(self):
-        payload = pack_ascii("TAG1") + b"\x00\x00" + pack_ascii("DESCRIPTOR  ") + b"\x00\x00\x00" + b"\x0F\x06\x00"
+        payload = (
+            pack_ascii("TAG1")
+            + b"\x00\x00"
+            + pack_ascii("DESCRIPTOR  ")
+            + b"\x00\x00\x00"
+            + b"\x0f\x06\x00"
+        )
         # Need exactly 21 bytes: tag(6) + descriptor(12) + day(1) + month(1) + year(1)
         tag_bytes = pack_ascii("PT01")  # 3 bytes for 4 chars
         desc_bytes = pack_ascii("PRESSURE TX ")  # 9 bytes for 12 chars
-        payload = tag_bytes[:6].ljust(6, b"\x00") + desc_bytes[:12].ljust(12, b"\x00") + b"\x0F\x06\x00"
+        payload = (
+            tag_bytes[:6].ljust(6, b"\x00") + desc_bytes[:12].ljust(12, b"\x00") + b"\x0f\x06\x00"
+        )
         if len(payload) >= 21:
             result = parse_cmd13(payload)
             if result:
@@ -1118,7 +1283,7 @@ class TestParseCmd48Edges:
         assert result["standardized_status_1"] == 1
 
     def test_14_bytes(self):
-        result = parse_cmd48(b"\x00" * 13 + b"\xFF")
+        result = parse_cmd48(b"\x00" * 13 + b"\xff")
         assert result["analog_channel_fixed"] == 0xFF
 
     def test_25_bytes_full(self):
@@ -1218,7 +1383,7 @@ class TestDirectPDUEdges:
 
     def test_parse_response_byte_count_exceeds_data(self):
         """Command claims 10 bytes but only 2 remain."""
-        data = b"\x00\x00" + b"\x00\x00\x0A\x00\x00"  # cmd=0, bc=10, 2 bytes data
+        data = b"\x00\x00" + b"\x00\x00\x0a\x00\x00"  # cmd=0, bc=10, 2 bytes data
         with pytest.raises(ValueError, match="truncated"):
             parse_direct_pdu_response(data)
 
@@ -1234,7 +1399,7 @@ class TestDirectPDUEdges:
         """Two commands: first succeeds, second fails."""
         data = b"\x00\x00"
         # cmd 0: rc=0, 2 bytes payload
-        data += b"\x00\x00\x03\x00\xAA\xBB"
+        data += b"\x00\x00\x03\x00\xaa\xbb"
         # cmd 48: rc=16 (DEVICE_BUSY)
         data += b"\x00\x30\x01\x10"
         result = parse_direct_pdu_response(data)
@@ -1243,15 +1408,19 @@ class TestDirectPDUEdges:
 
     def test_parse_request_no_response_code(self):
         """Request parsing: all data bytes are command data, no response_code."""
-        data = b"\x00\x00" + b"\x00\x00\x03\xAA\xBB\xCC"
+        data = b"\x00\x00" + b"\x00\x00\x03\xaa\xbb\xcc"
         result = parse_direct_pdu_request(data)
         assert result.commands[0].response_code is None
-        assert result.commands[0].data == b"\xAA\xBB\xCC"
+        assert result.commands[0].data == b"\xaa\xbb\xcc"
 
     def test_direct_pdu_iteration(self):
-        pdu = DirectPDU(commands=[
-            DirectPDUCommand(0), DirectPDUCommand(1), DirectPDUCommand(48),
-        ])
+        pdu = DirectPDU(
+            commands=[
+                DirectPDUCommand(0),
+                DirectPDUCommand(1),
+                DirectPDUCommand(48),
+            ]
+        )
         assert len(pdu) == 3
         assert pdu[0].command_number == 0
         assert [c.command_number for c in pdu] == [0, 1, 48]
@@ -1263,7 +1432,7 @@ class TestDirectPDUEdges:
         assert encoded[2] == 2  # byte_count = len(data)
 
     def test_encode_response(self):
-        cmd = DirectPDUCommand(command_number=0, data=b"\xAA", response_code=5)
+        cmd = DirectPDUCommand(command_number=0, data=b"\xaa", response_code=5)
         encoded = cmd.encode_response()
         assert encoded[2] == 2  # byte_count = 1 (rc) + 1 (data)
         assert encoded[3] == 5  # response_code
@@ -1289,10 +1458,18 @@ class TestAuditLogEdges:
             parse_audit_log_response(b"\x00" * 21)
 
     def test_parse_exactly_22_bytes_0_records(self):
-        data = bytes([
-            0,    # start_record
-            0,    # number_of_records = 0
-        ]) + b"\x00" * 8 + b"\x00" * 8 + b"\x00\x00" + b"\x00\x3a"  # session_record_size=58
+        data = (
+            bytes(
+                [
+                    0,  # start_record
+                    0,  # number_of_records = 0
+                ]
+            )
+            + b"\x00" * 8
+            + b"\x00" * 8
+            + b"\x00\x00"
+            + b"\x00\x3a"
+        )  # session_record_size=58
         result = parse_audit_log_response(data)
         assert result.number_of_records == 0
         assert result.records == []
@@ -1307,11 +1484,13 @@ class TestAuditLogEdges:
 
     def test_session_log_record_too_short(self):
         from hartip.v2 import _parse_session_log_record
+
         with pytest.raises(ValueError, match="too short"):
             _parse_session_log_record(b"\x00" * 57)
 
     def test_session_log_record_valid(self):
         from hartip.v2 import _parse_session_log_record
+
         data = (
             b"\xc0\xa8\x01\x01"  # ipv4: 192.168.1.1
             + b"\x00" * 16  # ipv6: ::
@@ -1405,7 +1584,7 @@ class TestASCIIEdges:
     def test_unpack_4_bytes(self):
         """4 bytes: only first 3 bytes decoded (4th ignored)."""
         packed = pack_ascii("ABCD")  # 3 bytes
-        result = unpack_ascii(packed + b"\xFF")
+        result = unpack_ascii(packed + b"\xff")
         assert result == "ABCD"
 
     def test_trailing_spaces_stripped(self):
@@ -1515,7 +1694,11 @@ class TestBuildRequest:
 
     def test_short_frame_roundtrip(self):
         frame = build_request(
-            sequence=1, delimiter=0x02, address=b"\x00", command=0, data=b"",
+            sequence=1,
+            delimiter=0x02,
+            address=b"\x00",
+            command=0,
+            data=b"",
         )
         header = HARTIPHeader.parse(frame[:8])
         assert header.msg_id == HARTIPMessageID.HART_PDU
@@ -1524,9 +1707,13 @@ class TestBuildRequest:
         assert pdu.command == 0
 
     def test_long_frame_roundtrip(self):
-        addr = b"\x80\x1A\x00\x01\x00"
+        addr = b"\x80\x1a\x00\x01\x00"
         frame = build_request(
-            sequence=1, delimiter=0x82, address=addr, command=1, data=b"\x01",
+            sequence=1,
+            delimiter=0x82,
+            address=addr,
+            command=1,
+            data=b"\x01",
         )
         pdu = parse_pdu(frame[8:])
         assert pdu.delimiter == 0x82
@@ -1536,7 +1723,10 @@ class TestBuildRequest:
 
     def test_build_request_checksum_valid(self):
         frame = build_request(
-            sequence=1, delimiter=0x02, address=b"\x00", command=0,
+            sequence=1,
+            delimiter=0x02,
+            address=b"\x00",
+            command=0,
         )
         pdu_bytes = frame[8:]
         assert xor_checksum(pdu_bytes) == 0
@@ -1551,7 +1741,9 @@ class TestExceptionEdges:
     """Exception edge cases."""
 
     def test_hart_error_is_base(self):
-        from hartip.exceptions import HARTError, HARTIPError as _HARTIPError
+        from hartip.exceptions import HARTError
+        from hartip.exceptions import HARTIPError as _HARTIPError
+
         assert issubclass(_HARTIPError, HARTError)
         assert issubclass(HARTProtocolError, HARTError)
 
@@ -1562,6 +1754,7 @@ class TestExceptionEdges:
 
     def test_tls_error_ssl_attribute(self):
         import ssl
+
         try:
             raise ssl.SSLError("cert fail")
         except ssl.SSLError as e:
@@ -1718,10 +1911,22 @@ class TestParseCmd11Alias:
         assert parse_cmd11 is parse_cmd0
 
     def test_parses_same_as_cmd0(self):
-        payload = bytes([
-            0xFE, 0x26, 0x01, 5, 7, 3, 2, 0x28, 0x00,
-            0x00, 0x01, 0x00,
-        ])
+        payload = bytes(
+            [
+                0xFE,
+                0x26,
+                0x01,
+                5,
+                7,
+                3,
+                2,
+                0x28,
+                0x00,
+                0x00,
+                0x01,
+                0x00,
+            ]
+        )
         info_0 = parse_cmd0(payload)
         info_11 = parse_cmd11(payload)
         assert info_0.manufacturer_id == info_11.manufacturer_id
@@ -1806,7 +2011,7 @@ class TestParseCmd33Edges:
 
     def test_partial_slot_ignored(self):
         """7 bytes = 1 full slot (6) + 1 partial byte."""
-        payload = bytes([0x01, 32]) + struct.pack(">f", 1.0) + b"\xFF"
+        payload = bytes([0x01, 32]) + struct.pack(">f", 1.0) + b"\xff"
         result = parse_cmd33(payload)
         assert len(result["variables"]) == 1
 
@@ -1865,7 +2070,7 @@ class TestParseCmd35:
         assert parse_cmd35(b"") == {}
 
     def test_extra_bytes(self):
-        payload = bytes([39]) + struct.pack(">f", 50.0) + struct.pack(">f", 10.0) + b"\xFF"
+        payload = bytes([39]) + struct.pack(">f", 50.0) + struct.pack(">f", 10.0) + b"\xff"
         result = parse_cmd35(payload)
         assert abs(result["upper_range_value"] - 50.0) < 1e-5
 
@@ -1988,11 +2193,13 @@ class TestParseCmd90:
     """Command 90 (Read Device & Message Timing) — 15B."""
 
     def test_valid(self):
-        payload = bytes([
-            14,     # day
-            2,      # month
-            126,    # year (1900+126=2026)
-        ])
+        payload = bytes(
+            [
+                14,  # day
+                2,  # month
+                126,  # year (1900+126=2026)
+            ]
+        )
         payload += struct.pack(">I", 32000)  # device_timestamp
         payload += bytes([14, 2, 126])  # last received date
         payload += struct.pack(">I", 16000)  # last_received_timestamp

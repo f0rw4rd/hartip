@@ -18,13 +18,17 @@ Provides a synchronous client that handles:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import socket
 import ssl
 import threading
 import time
 import warnings
-from typing import Any, Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
+
+if TYPE_CHECKING:
+    from .v2 import AuditLogResponse, DirectPDU, DirectPDUCommand
 
 from .constants import (
     CMD_EXTENDED_CMD,
@@ -41,8 +45,6 @@ from .constants import (
     MAX_SINGLE_BYTE_CMD,
     HARTCommand,
     HARTFrameType,
-    HARTIPMessageID,
-    HARTIPMessageType,
     HARTIPStatus,
     HARTIPVersion,
     HARTResponseCode,
@@ -59,9 +61,7 @@ from .exceptions import (
 )
 from .protocol import (
     HARTIPHeader,
-    HARTPdu,
     build_keep_alive,
-    build_pdu,
     build_request,
     build_session_close,
     build_session_init,
@@ -92,13 +92,13 @@ class HARTIPResponse:
     """
 
     __slots__ = (
+        "_parsed_cache",
+        "comm_error",
+        "device_status",
         "header",
+        "payload",
         "pdu",
         "response_code",
-        "device_status",
-        "payload",
-        "comm_error",
-        "_parsed_cache",
     )
 
     def __init__(
@@ -418,7 +418,9 @@ class HARTIPClient:
             raise
         except OSError as exc:
             self._connected = False
-            raise HARTIPConnectionError(f"Failed to connect to {self.host}:{self.port}: {exc}")
+            raise HARTIPConnectionError(
+                f"Failed to connect to {self.host}:{self.port}: {exc}"
+            ) from exc
 
         # Initiate HART-IP session
         self._sequence = 0
@@ -496,6 +498,7 @@ class HARTIPClient:
                 psk_bytes = self._psk_key
 
                 if hasattr(ctx, "set_psk_client_callback"):
+
                     def _psk_callback(
                         _hint: str | None,
                     ) -> tuple[str | None, bytes]:
@@ -504,8 +507,7 @@ class HARTIPClient:
                     ctx.set_psk_client_callback(_psk_callback)
                 else:
                     logger.warning(
-                        "PSK callbacks require Python 3.13+; "
-                        "TLS-PSK authentication not available"
+                        "PSK callbacks require Python 3.13+; TLS-PSK authentication not available"
                     )
 
         try:
@@ -523,9 +525,7 @@ class HARTIPClient:
                 accepted = self._cert_validator(peer_cert)
             except Exception as exc:
                 tls_sock.close()
-                raise HARTIPTLSError(
-                    f"Certificate validation callback raised: {exc}"
-                ) from exc
+                raise HARTIPTLSError(f"Certificate validation callback raised: {exc}") from exc
             if not accepted:
                 tls_sock.close()
                 raise HARTIPTLSError("Certificate rejected by cert_validator callback")
@@ -583,10 +583,8 @@ class HARTIPClient:
             try:
                 # For TLS sockets, try graceful shutdown
                 if isinstance(self._socket, ssl.SSLSocket):
-                    try:
+                    with contextlib.suppress(OSError, ssl.SSLError):
                         self._socket.unwrap()
-                    except (OSError, ssl.SSLError):
-                        pass
                 self._socket.close()
             except OSError:
                 pass
@@ -725,9 +723,7 @@ class HARTIPClient:
 
         # Raise ValueError if use_long_frame without unique_addr
         if use_long_frame and unique_addr is None:
-            raise ValueError(
-                "use_long_frame=True requires unique_addr (5-byte device address)"
-            )
+            raise ValueError("use_long_frame=True requires unique_addr (5-byte device address)")
 
         # Auto-detect long frame when unique_addr is provided
         if unique_addr is not None:
@@ -768,9 +764,7 @@ class HARTIPClient:
 
         # Delayed-response retry logic
         if resp.response_code in DR_RETRY_CODES:
-            resp = self._handle_delayed_response(
-                delimiter, addr_bytes, wire_command, wire_data
-            )
+            resp = self._handle_delayed_response(delimiter, addr_bytes, wire_command, wire_data)
 
         return resp
 
@@ -814,13 +808,9 @@ class HARTIPClient:
             if retry > 0 and delay < max_delay:
                 delay = min(delay * 2, max_delay)
 
-        logger.warning(
-            "Delayed-response retry limit (%d) exceeded", self.dr_retries
-        )
+        logger.warning("Delayed-response retry limit (%d) exceeded", self.dr_retries)
         if resp is None:
-            raise HARTIPTimeoutError(
-                f"Delayed-response retry limit ({self.dr_retries}) exceeded"
-            )
+            raise HARTIPTimeoutError(f"Delayed-response retry limit ({self.dr_retries}) exceeded")
         return resp
 
     def _recv_tcp(self) -> bytes:
@@ -914,9 +904,7 @@ class HARTIPClient:
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
         """Command 0: Read Unique Identifier."""
-        return self.send_command(
-            HARTCommand.READ_UNIQUE_ID, address, unique_addr=unique_addr
-        )
+        return self.send_command(HARTCommand.READ_UNIQUE_ID, address, unique_addr=unique_addr)
 
     def read_primary_variable(
         self, address: int = 0, *, unique_addr: bytes | None = None
@@ -938,9 +926,7 @@ class HARTIPClient:
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
         """Command 3: Read Dynamic Variables."""
-        return self.send_command(
-            HARTCommand.READ_DYNAMIC_VARS, address, unique_addr=unique_addr
-        )
+        return self.send_command(HARTCommand.READ_DYNAMIC_VARS, address, unique_addr=unique_addr)
 
     def read_device_vars_status(
         self,
@@ -963,7 +949,9 @@ class HARTIPClient:
         """
         data = bytes(device_var_codes[:8])
         return self.send_command(
-            HARTCommand.READ_DEVICE_VARS_STATUS, address, data=data,
+            HARTCommand.READ_DEVICE_VARS_STATUS,
+            address,
+            data=data,
             unique_addr=unique_addr,
         )
 
@@ -985,7 +973,9 @@ class HARTIPClient:
         """
         data = bytes([poll_address & 0x3F, loop_current_mode & 0x01])
         return self.send_command(
-            HARTCommand.WRITE_POLL_ADDRESS, address, data=data,
+            HARTCommand.WRITE_POLL_ADDRESS,
+            address,
+            data=data,
             unique_addr=unique_addr,
         )
 
@@ -993,26 +983,21 @@ class HARTIPClient:
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
         """Command 7: Read Loop Configuration."""
-        return self.send_command(
-            HARTCommand.READ_LOOP_CONFIG, address, unique_addr=unique_addr
-        )
+        return self.send_command(HARTCommand.READ_LOOP_CONFIG, address, unique_addr=unique_addr)
 
     def read_dynamic_var_classifications(
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
         """Command 8: Read Dynamic Variable Classifications."""
         return self.send_command(
-            HARTCommand.READ_DYNAMIC_VAR_CLASSIFICATION, address,
+            HARTCommand.READ_DYNAMIC_VAR_CLASSIFICATION,
+            address,
             unique_addr=unique_addr,
         )
 
-    def read_message(
-        self, address: int = 0, *, unique_addr: bytes | None = None
-    ) -> HARTIPResponse:
+    def read_message(self, address: int = 0, *, unique_addr: bytes | None = None) -> HARTIPResponse:
         """Command 12: Read Message (24-byte packed ASCII)."""
-        return self.send_command(
-            HARTCommand.READ_MESSAGE, address, unique_addr=unique_addr
-        )
+        return self.send_command(HARTCommand.READ_MESSAGE, address, unique_addr=unique_addr)
 
     def read_tag_descriptor_date(
         self, address: int = 0, *, unique_addr: bytes | None = None
@@ -1022,9 +1007,7 @@ class HARTIPClient:
             HARTCommand.READ_TAG_DESCRIPTOR_DATE, address, unique_addr=unique_addr
         )
 
-    def read_pv_info(
-        self, address: int = 0, *, unique_addr: bytes | None = None
-    ) -> HARTIPResponse:
+    def read_pv_info(self, address: int = 0, *, unique_addr: bytes | None = None) -> HARTIPResponse:
         """Command 14: Read Primary Variable Transducer Information."""
         return self.send_command(
             HARTCommand.READ_PRIMARY_VAR_INFO, address, unique_addr=unique_addr
@@ -1034,17 +1017,13 @@ class HARTIPClient:
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
         """Command 15: Read Output Information."""
-        return self.send_command(
-            HARTCommand.READ_OUTPUT_INFO, address, unique_addr=unique_addr
-        )
+        return self.send_command(HARTCommand.READ_OUTPUT_INFO, address, unique_addr=unique_addr)
 
     def read_final_assembly(
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
         """Command 16: Read Final Assembly Number."""
-        return self.send_command(
-            HARTCommand.READ_FINAL_ASSEMBLY, address, unique_addr=unique_addr
-        )
+        return self.send_command(HARTCommand.READ_FINAL_ASSEMBLY, address, unique_addr=unique_addr)
 
     def write_message(
         self,
@@ -1064,7 +1043,9 @@ class HARTIPClient:
 
         packed = pack_ascii(message.ljust(32)[:32])[:24]
         return self.send_command(
-            HARTCommand.WRITE_MESSAGE, address, data=packed,
+            HARTCommand.WRITE_MESSAGE,
+            address,
+            data=packed,
             unique_addr=unique_addr,
         )
 
@@ -1096,7 +1077,9 @@ class HARTIPClient:
         desc_packed = pack_ascii(descriptor.ljust(16)[:16])[:12]
         data = tag_packed + desc_packed + bytes([day, month, year])
         return self.send_command(
-            HARTCommand.WRITE_TAG_DESCRIPTOR_DATE, address, data=data,
+            HARTCommand.WRITE_TAG_DESCRIPTOR_DATE,
+            address,
+            data=data,
             unique_addr=unique_addr,
         )
 
@@ -1116,7 +1099,9 @@ class HARTIPClient:
         """
         data = assembly_number.to_bytes(3, "big")
         return self.send_command(
-            HARTCommand.WRITE_FINAL_ASSEMBLY, address, data=data,
+            HARTCommand.WRITE_FINAL_ASSEMBLY,
+            address,
+            data=data,
             unique_addr=unique_addr,
         )
 
@@ -1124,9 +1109,7 @@ class HARTIPClient:
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
         """Command 20: Read Long Tag (HART 6+)."""
-        return self.send_command(
-            HARTCommand.READ_LONG_TAG, address, unique_addr=unique_addr
-        )
+        return self.send_command(HARTCommand.READ_LONG_TAG, address, unique_addr=unique_addr)
 
     def read_additional_status(
         self, address: int = 0, *, unique_addr: bytes | None = None
@@ -1140,9 +1123,7 @@ class HARTIPClient:
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
         """Command 41: Perform Device Self-Test."""
-        return self.send_command(
-            HARTCommand.PERFORM_SELF_TEST, address, unique_addr=unique_addr
-        )
+        return self.send_command(HARTCommand.PERFORM_SELF_TEST, address, unique_addr=unique_addr)
 
     # -- v2 convenience wrappers (msg_id=4, msg_id=5) -----------------------
 
@@ -1172,7 +1153,10 @@ class HARTIPClient:
             HARTIPTimeoutError: No response within timeout.
             HARTIPStatusError: HART-IP header status != 0.
         """
-        from .v2 import DirectPDU, DirectPDUCommand, build_direct_pdu_request, parse_direct_pdu_response
+        from .v2 import (
+            build_direct_pdu_request,
+            parse_direct_pdu_response,
+        )
 
         if not self._connected or not self._socket:
             raise HARTIPConnectionError("Not connected")
@@ -1223,7 +1207,7 @@ class HARTIPClient:
             HARTIPTimeoutError: No response within timeout.
             HARTIPStatusError: HART-IP header status != 0.
         """
-        from .v2 import AuditLogResponse, build_audit_log_request, parse_audit_log_response
+        from .v2 import build_audit_log_request, parse_audit_log_response
 
         if not self._connected or not self._socket:
             raise HARTIPConnectionError("Not connected")

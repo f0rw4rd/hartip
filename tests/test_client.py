@@ -1,8 +1,6 @@
 """Tests for HART-IP client (unit tests with mocked sockets)."""
 
 import struct
-import threading
-import time
 import warnings
 from unittest.mock import MagicMock, patch
 
@@ -17,7 +15,7 @@ from hartip.constants import (
     HARTIPStatus,
     HARTResponseCode,
 )
-from hartip.device import DeviceInfo, Variable, parse_cmd0, parse_cmd1, parse_cmd3
+from hartip.device import parse_cmd0, parse_cmd1, parse_cmd3
 from hartip.exceptions import (
     HARTCommunicationError,
     HARTIPConnectionError,
@@ -25,12 +23,12 @@ from hartip.exceptions import (
     HARTIPTLSError,
     HARTResponseError,
 )
-from hartip.protocol import HARTIPHeader, build_pdu, xor_checksum
-
+from hartip.protocol import HARTIPHeader, build_pdu
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_session_init_response(status: int = 0) -> bytes:
     """Build a synthetic Session Initiate response."""
@@ -192,7 +190,7 @@ class TestHARTIPClient:
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
-            resp = client.send_command(0, address=5)
+            client.send_command(0, address=5)
             # Check the PDU address byte in the sent frame
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
             pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
@@ -217,11 +215,10 @@ class TestHARTIPClient:
             ]
 
             from hartip.constants import MASTER_TYPE_SECONDARY
-            client = HARTIPClient(
-                "127.0.0.1", protocol="udp", master_type=MASTER_TYPE_SECONDARY
-            )
+
+            client = HARTIPClient("127.0.0.1", protocol="udp", master_type=MASTER_TYPE_SECONDARY)
             client.connect()
-            resp = client.send_command(0, address=5)
+            client.send_command(0, address=5)
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
             pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
             # Secondary master: address byte = 5 & 0x3F = 0x05 (no bit 7)
@@ -480,7 +477,7 @@ class TestExtendedCommand:
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
-            resp = client.send_command(768)  # Should wrap in cmd 31
+            client.send_command(768)  # Should wrap in cmd 31
             # Verify the sent frame contains command 31
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
             pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
@@ -653,7 +650,7 @@ class TestConvenienceMethods:
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
             pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
             assert pdu_bytes[4] == 0x3F  # masked to 6 bits
-            assert pdu_bytes[5] == 1     # loop_current_mode
+            assert pdu_bytes[5] == 1  # loop_current_mode
 
     def test_read_loop_config(self) -> None:
         """Command 7 is a read-only command (no request data)."""
@@ -721,8 +718,8 @@ class TestConvenienceMethods:
             assert pdu_bytes[3] == 21  # byte_count = 21
             # Last 3 bytes of data are day, month, year
             data_start = 4
-            assert pdu_bytes[data_start + 18] == 15   # day
-            assert pdu_bytes[data_start + 19] == 2    # month
+            assert pdu_bytes[data_start + 18] == 15  # day
+            assert pdu_bytes[data_start + 19] == 2  # month
             assert pdu_bytes[data_start + 20] == 126  # year (2026 - 1900)
 
     def test_write_final_assembly(self) -> None:
@@ -738,7 +735,7 @@ class TestConvenienceMethods:
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
             pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
             assert pdu_bytes[2] == 19  # command 19
-            assert pdu_bytes[3] == 3   # byte_count = 3
+            assert pdu_bytes[3] == 3  # byte_count = 3
             assert pdu_bytes[4:7] == bytes([0x01, 0x02, 0x03])  # big-endian
 
     def test_read_output_info(self) -> None:
@@ -794,14 +791,16 @@ class TestDelayedResponse:
             mock_sock_cls.return_value = mock_sock
             mock_sock.recvfrom.side_effect = [
                 (session_resp, _ADDR),
-                (dr_resp, _ADDR),     # initial command → DR
-                (ok_resp, _ADDR),     # retry → success
+                (dr_resp, _ADDR),  # initial command → DR
+                (ok_resp, _ADDR),  # retry → success
                 (close_resp, _ADDR),
             ]
 
             client = HARTIPClient(
-                "127.0.0.1", protocol="udp",
-                dr_retries=5, dr_retry_delay=1,  # 1ms delay for testing
+                "127.0.0.1",
+                protocol="udp",
+                dr_retries=5,
+                dr_retry_delay=1,  # 1ms delay for testing
             )
             client.connect()
             resp = client.send_command(0)
@@ -819,6 +818,7 @@ class TestHARTIPResponseRepr:
     def test_repr_with_pdu(self) -> None:
         class FakePdu:
             command = 0
+
         resp = HARTIPResponse(header=None, pdu=FakePdu(), response_code=0, payload=b"\x01\x02")
         r = repr(resp)
         assert "cmd=0" in r
@@ -860,6 +860,7 @@ class TestRaiseForError:
     def test_response_code_raises_response_error(self) -> None:
         class FakePdu:
             command = 48
+
         resp = HARTIPResponse(header=None, pdu=FakePdu(), response_code=1)
         with pytest.raises(HARTResponseError) as exc_info:
             resp.raise_for_error()
@@ -948,6 +949,7 @@ class TestClientWarnings:
 
     def test_ssl_context_with_psk_warning(self) -> None:
         import ssl
+
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -1116,9 +1118,7 @@ class TestCertValidator:
                 session_resp = _build_session_init_response()
                 tls_sock.recv.return_value = session_resp
 
-                client = HARTIPClient(
-                    "127.0.0.1", protocol="tcp", tls=True, cert_validator=_accept
-                )
+                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True, cert_validator=_accept)
                 client.connect()
                 assert len(calls) == 1
                 assert calls[0] == {"subject": "test"}
@@ -1141,9 +1141,7 @@ class TestCertValidator:
                 tls_sock.getpeercert.return_value = {"subject": "bad"}
                 mock_ctx.wrap_socket.return_value = tls_sock
 
-                client = HARTIPClient(
-                    "127.0.0.1", protocol="tcp", tls=True, cert_validator=_reject
-                )
+                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True, cert_validator=_reject)
                 with pytest.raises(HARTIPTLSError, match="rejected by cert_validator"):
                     client.connect()
                 tls_sock.close.assert_called()
@@ -1165,9 +1163,7 @@ class TestCertValidator:
                 tls_sock.getpeercert.return_value = {}
                 mock_ctx.wrap_socket.return_value = tls_sock
 
-                client = HARTIPClient(
-                    "127.0.0.1", protocol="tcp", tls=True, cert_validator=_crash
-                )
+                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True, cert_validator=_crash)
                 with pytest.raises(HARTIPTLSError, match="fingerprint mismatch"):
                     client.connect()
                 tls_sock.close.assert_called()

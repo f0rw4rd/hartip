@@ -12,14 +12,13 @@ from __future__ import annotations
 import pytest
 
 from hartip import (
-    HARTCommand,
     HARTIPClient,
     HARTResponseCode,
     parse_cmd0,
     parse_cmd1,
     parse_cmd3,
 )
-from hartip.exceptions import HARTIPConnectionError, HARTIPTimeoutError
+from hartip.exceptions import HARTIPTimeoutError
 
 from .conftest import skip_no_hipserver, skip_no_tcp
 

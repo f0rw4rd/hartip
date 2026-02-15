@@ -31,7 +31,7 @@ class TestXorChecksum:
         assert xor_checksum(b"\x42") == 0x42
 
     def test_two_bytes(self) -> None:
-        assert xor_checksum(b"\xFF\xFF") == 0x00
+        assert xor_checksum(b"\xff\xff") == 0x00
 
     def test_known_sequence(self) -> None:
         assert xor_checksum(b"\x02\x00\x00\x00") == 0x02
@@ -197,7 +197,7 @@ class TestParsePdu:
         assert pdu.command == 0
 
     def test_with_preamble(self) -> None:
-        preamble = b"\xFF\xFF\xFF\xFF\xFF"
+        preamble = b"\xff\xff\xff\xff\xff"
         raw = preamble + build_pdu(HARTFrameType.SHORT_FRAME, b"\x00", 0)
         pdu = parse_pdu(raw)
         assert pdu.preamble_count == 5
@@ -243,7 +243,7 @@ class TestParsePdu:
 
     def test_only_preambles_raises(self) -> None:
         with pytest.raises(ValueError, match="only preamble"):
-            parse_pdu(b"\xFF\xFF\xFF")
+            parse_pdu(b"\xff\xff\xff")
 
     def test_empty_raises(self) -> None:
         with pytest.raises(ValueError, match="only preamble"):
@@ -278,6 +278,7 @@ class TestBuildSessionInit:
 
     def test_payload_inactivity_timer(self) -> None:
         import struct
+
         frame = build_session_init(sequence=1, inactivity_timer=60000)
         payload = frame[HARTIP_HEADER_SIZE:]
         timer = struct.unpack(">I", payload[1:5])[0]
@@ -336,6 +337,7 @@ class TestPduContainer:
 
     def test_pdu_container_is_dataclass(self) -> None:
         from dataclasses import fields
+
         f = fields(PduContainer)
         names = [field.name for field in f]
         assert "delimiter" in names

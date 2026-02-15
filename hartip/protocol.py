@@ -150,9 +150,7 @@ def build_pdu(
         ValueError: If data length exceeds 255 bytes (byte_count is uint8).
     """
     if len(data) > 255:
-        raise ValueError(
-            f"PDU data length {len(data)} exceeds maximum of 255 bytes"
-        )
+        raise ValueError(f"PDU data length {len(data)} exceeds maximum of 255 bytes")
     byte_count = len(data)
     frame_no_cksum = bytes([delimiter]) + address + bytes([command, byte_count]) + data
     checksum = xor_checksum(frame_no_cksum)
@@ -210,9 +208,7 @@ def parse_pdu(data: bytes) -> object:
     expansion_bytes = b""
     if expansion_count > 0:
         if offset + expansion_count > length:
-            raise ValueError(
-                f"PDU too short for {expansion_count} expansion bytes"
-            )
+            raise ValueError(f"PDU too short for {expansion_count} expansion bytes")
         expansion_bytes = data[offset : offset + expansion_count]
         offset += expansion_count
 
@@ -226,9 +222,7 @@ def parse_pdu(data: bytes) -> object:
     offset += 1
 
     if offset + byte_count > length:
-        raise ValueError(
-            f"PDU byte_count={byte_count} but only {length - offset} bytes remain"
-        )
+        raise ValueError(f"PDU byte_count={byte_count} but only {length - offset} bytes remain")
     pdu_data = data[offset : offset + byte_count]
     offset += byte_count
 
@@ -270,14 +264,14 @@ def build_session_init(
     payload = Int8ub.build(master_type) + Int32ub.build(inactivity_timer)
     total_len = HARTIP_HEADER_SIZE + len(payload)
     header = HARTIPHeader.build(
-        dict(
-            version=version,
-            msg_type=HARTIPMessageType.REQUEST,
-            msg_id=HARTIPMessageID.SESSION_INITIATE,
-            status=0,
-            sequence=sequence & 0xFFFF,
-            byte_count=total_len,
-        )
+        {
+            "version": version,
+            "msg_type": HARTIPMessageType.REQUEST,
+            "msg_id": HARTIPMessageID.SESSION_INITIATE,
+            "status": 0,
+            "sequence": sequence & 0xFFFF,
+            "byte_count": total_len,
+        }
     )
     return header + payload
 
@@ -286,14 +280,14 @@ def build_session_close(sequence: int, *, version: int = 1) -> bytes:
     """Build a HART-IP Session Close request."""
 
     header = HARTIPHeader.build(
-        dict(
-            version=version,
-            msg_type=HARTIPMessageType.REQUEST,
-            msg_id=HARTIPMessageID.SESSION_CLOSE,
-            status=0,
-            sequence=sequence & 0xFFFF,
-            byte_count=HARTIP_HEADER_SIZE,
-        )
+        {
+            "version": version,
+            "msg_type": HARTIPMessageType.REQUEST,
+            "msg_id": HARTIPMessageID.SESSION_CLOSE,
+            "status": 0,
+            "sequence": sequence & 0xFFFF,
+            "byte_count": HARTIP_HEADER_SIZE,
+        }
     )
     return header
 
@@ -302,14 +296,14 @@ def build_keep_alive(sequence: int, *, version: int = 1) -> bytes:
     """Build a HART-IP Keep Alive request."""
 
     header = HARTIPHeader.build(
-        dict(
-            version=version,
-            msg_type=HARTIPMessageType.REQUEST,
-            msg_id=HARTIPMessageID.KEEP_ALIVE,
-            status=0,
-            sequence=sequence & 0xFFFF,
-            byte_count=HARTIP_HEADER_SIZE,
-        )
+        {
+            "version": version,
+            "msg_type": HARTIPMessageType.REQUEST,
+            "msg_id": HARTIPMessageID.KEEP_ALIVE,
+            "status": 0,
+            "sequence": sequence & 0xFFFF,
+            "byte_count": HARTIP_HEADER_SIZE,
+        }
     )
     return header
 
@@ -342,14 +336,14 @@ def build_request(
     pdu = build_pdu(delimiter, address, command, data)
     total_len = HARTIP_HEADER_SIZE + len(pdu)
     header = HARTIPHeader.build(
-        dict(
-            version=version,
-            msg_type=HARTIPMessageType.REQUEST,
-            msg_id=HARTIPMessageID.HART_PDU,
-            status=0,
-            sequence=sequence & 0xFFFF,
-            byte_count=total_len,
-        )
+        {
+            "version": version,
+            "msg_type": HARTIPMessageType.REQUEST,
+            "msg_id": HARTIPMessageID.HART_PDU,
+            "status": 0,
+            "sequence": sequence & 0xFFFF,
+            "byte_count": total_len,
+        }
     )
     return header + pdu
 

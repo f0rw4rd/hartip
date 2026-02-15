@@ -13,12 +13,10 @@ from hartip.constants import (
     MAX_SINGLE_BYTE_CMD,
     HARTCommand,
     HARTCommErrorFlags,
-    HARTDeviceStatus,
     HARTFrameType,
     HARTIPMessageID,
     HARTIPMessageType,
     HARTIPStatus,
-    HARTIPVersion,
     HARTResponseCode,
 )
 

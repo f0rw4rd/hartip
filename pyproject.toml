@@ -45,9 +45,11 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "black>=23.0",
-    "mypy>=1.0",
-    "ruff>=0.1.0",
+    "ruff>=0.8.0",
+    "vulture>=2.11",
+    "bandit>=1.7",
+    "pip-audit>=2.7",
+    "pre-commit>=3.5",
 ]
 
 [project.urls]
@@ -59,26 +61,42 @@ Issues = "https://github.com/f0rw4rd/hartip/issues"
 where = ["."]
 include = ["hartip*"]
 
-[tool.black]
-line-length = 100
-target-version = ["py310", "py311", "py312"]
-
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "C4", "UP"]
-ignore = ["E501", "E402", "UP006", "UP007", "UP035", "UP038", "UP045"]
+select = ["E", "F", "W", "I", "B", "C4", "UP", "S", "SIM", "TC", "RUF"]
+ignore = [
+    "E501",    # line length handled by formatter
+    "UP006",   # keep typing.Optional etc for py310
+    "UP007",   # keep Union syntax for py310
+    "UP035",   # keep typing imports for py310
+    "UP045",   # keep Optional for py310
+    "S101",    # assert used in tests
+    "S104",    # "0.0.0.0" used as dataclass default, not a bind
+    "S311",    # pseudo-random not security concern here
+    "RUF022",  # __all__ intentionally grouped by category
+    "TC003",   # keep runtime imports simple for this library
+]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+"tests/**" = ["S101", "S106", "S603", "S607", "SIM105", "SIM117", "C408", "B007", "RUF003", "RUF043"]
+"vulture_whitelist.py" = ["B018", "E402", "F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.bandit]
+targets = ["hartip"]
+skips = ["B101", "B104", "B311"]
+
+[tool.vulture]
+paths = ["hartip"]
+min_confidence = 80
+exclude = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

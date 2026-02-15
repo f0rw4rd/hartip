@@ -8,8 +8,36 @@ repos:
   - repo: local
     hooks:
       - id: tests
-        name: tests
+        name: pytest
         entry: python -m pytest tests/ -x -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: test-collection
+        name: pytest --collect-only
+        entry: python -m pytest tests/ --collect-only -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: vulture
+        name: vulture (dead code)
+        entry: vulture hartip/ vulture_whitelist.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: bandit
+        name: bandit (security)
+        entry: bandit -c pyproject.toml -r hartip/
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: pip-audit
+        name: pip-audit (dependency vulns)
+        entry: pip-audit .
         language: system
         pass_filenames: false
         always_run: true

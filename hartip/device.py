@@ -11,7 +11,7 @@ Aliases: 6→7, 11→0, 17→12, 18→13, 19→16, 21→0, 22→20
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from construct import Float32b, Int16ub, Int32ub
@@ -268,7 +268,7 @@ def parse_cmd3(payload: bytes) -> dict:
     labels = ["PV", "SV", "TV", "QV"]
 
     offset = 4
-    for i, label in enumerate(labels):
+    for label in labels:
         if offset + 5 > len(payload):
             break
         unit_code = payload[offset]
@@ -427,7 +427,7 @@ def parse_cmd15(payload: bytes) -> dict:
     lower_range = Float32b.parse(payload[7:11])
     damping = Float32b.parse(payload[11:15])
     write_protect = payload[15]
-    reserved = payload[16]
+    # byte 16 is reserved (should be 250 = Not Used)
     analog_channel_flags = payload[17]
 
     return {
@@ -603,10 +603,10 @@ def parse_cmd33(payload: bytes) -> dict:
     labels = ["Slot 0", "Slot 1", "Slot 2", "Slot 3"]
     offset = 0
 
-    for i, label in enumerate(labels):
+    for label in labels:
         if offset + 6 > len(payload):
             break
-        device_var_code = payload[offset]
+        # byte 0 is device_var_code (unused in Variable, skip)
         unit_code = payload[offset + 1]
         value = Float32b.parse(payload[offset + 2 : offset + 6])
         variables.append(Variable(value=value, unit_code=unit_code, label=label))

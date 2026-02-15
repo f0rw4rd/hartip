@@ -40,7 +40,6 @@ from hartip.v2 import (
     parse_direct_pdu_response,
 )
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -145,10 +144,10 @@ class TestDirectPDUCommand:
         assert encoded == b"\x00\x30\x03\x01\x02\x03"
 
     def test_encode_request_extended_command(self):
-        cmd = DirectPDUCommand(command_number=541, data=b"\xAA")
+        cmd = DirectPDUCommand(command_number=541, data=b"\xaa")
         encoded = cmd.encode_request()
         # cmd=541 -> 0x021D, bc=1, data=\xAA
-        assert encoded == b"\x02\x1D\x01\xAA"
+        assert encoded == b"\x02\x1d\x01\xaa"
 
     def test_encode_response(self):
         cmd = DirectPDUCommand(command_number=0, data=b"\x01\x02", response_code=0)
@@ -213,9 +212,7 @@ class TestBuildDirectPDU:
 
     def test_v1_version_override(self):
         cmds = [DirectPDUCommand(command_number=0)]
-        frame = build_direct_pdu_request(
-            sequence=1, commands=cmds, version=HARTIPVersion.V1
-        )
+        frame = build_direct_pdu_request(sequence=1, commands=cmds, version=HARTIPVersion.V1)
         header = HARTIPHeader.parse(frame[:HARTIP_HEADER_SIZE])
         assert header.version == HARTIPVersion.V1
 
@@ -249,7 +246,7 @@ class TestParseDirectPDUResponse:
         payload = (
             b"\x40\x00"  # device_status=0x40, extended_status=0
             + b"\x00\x00\x01\x00"  # cmd0: number=0, bc=1, rc=0
-            + b"\x00\x30\x03\x00\xAA\xBB"  # cmd48: number=48, bc=3, rc=0, data=\xAA\xBB
+            + b"\x00\x30\x03\x00\xaa\xbb"  # cmd48: number=48, bc=3, rc=0, data=\xAA\xBB
         )
         result = parse_direct_pdu_response(payload)
 
@@ -262,7 +259,7 @@ class TestParseDirectPDUResponse:
 
         assert result.commands[1].command_number == 48
         assert result.commands[1].response_code == 0
-        assert result.commands[1].data == b"\xAA\xBB"
+        assert result.commands[1].data == b"\xaa\xbb"
 
     def test_zero_byte_count_command(self):
         # Command with byte_count=0 (no response code or data)
@@ -292,13 +289,13 @@ class TestParseDirectPDURequest:
     """Test parsing Direct PDU requests (no response_code)."""
 
     def test_single_request_command(self):
-        payload = b"\x00\x00" + b"\x00\x00\x02\xAA\xBB"
+        payload = b"\x00\x00" + b"\x00\x00\x02\xaa\xbb"
         result = parse_direct_pdu_request(payload)
 
         assert len(result.commands) == 1
         assert result.commands[0].command_number == 0
         assert result.commands[0].response_code is None
-        assert result.commands[0].data == b"\xAA\xBB"
+        assert result.commands[0].data == b"\xaa\xbb"
 
     def test_empty_data_request(self):
         payload = b"\x00\x00" + b"\x00\x00\x00"
@@ -325,7 +322,7 @@ class TestDirectPDURoundtrip:
     def test_roundtrip_multiple_commands(self):
         cmds = [
             DirectPDUCommand(command_number=0, data=b""),
-            DirectPDUCommand(command_number=1, data=b"\xFF"),
+            DirectPDUCommand(command_number=1, data=b"\xff"),
             DirectPDUCommand(command_number=541, data=b"\x01\x02\x03\x04"),
         ]
         frame = build_direct_pdu_request(
@@ -343,7 +340,7 @@ class TestDirectPDURoundtrip:
         assert result.commands[0].command_number == 0
         assert result.commands[0].data == b""
         assert result.commands[1].command_number == 1
-        assert result.commands[1].data == b"\xFF"
+        assert result.commands[1].data == b"\xff"
         assert result.commands[2].command_number == 541
         assert result.commands[2].data == b"\x01\x02\x03\x04"
 
