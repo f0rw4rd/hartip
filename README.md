@@ -5,6 +5,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/hartip-py)](https://pypi.org/project/hartip-py/)
 [![License](https://img.shields.io/github/license/f0rw4rd/hartip)](LICENSE)
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![DCO](https://img.shields.io/badge/DCO-required-blue)](CONTRIBUTING.md)
 
 Pure-Python HART-IP **client** library. Server functionality is not included.
 
