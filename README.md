@@ -1,5 +1,11 @@
 # hartip-py
 
+[![CI](https://github.com/f0rw4rd/hartip/actions/workflows/ci.yml/badge.svg)](https://github.com/f0rw4rd/hartip/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/hartip-py)](https://pypi.org/project/hartip-py/)
+[![Python](https://img.shields.io/pypi/pyversions/hartip-py)](https://pypi.org/project/hartip-py/)
+[![License](https://img.shields.io/github/license/f0rw4rd/hartip)](LICENSE)
+[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 Pure-Python HART-IP **client** library. Server functionality is not included.
 
 Supports HART-IP v1 (plaintext, TCP/UDP) and v2 (TLS, Direct PDU, Audit Log).
