@@ -1,0 +1,51 @@
+name: HART Command Request
+description: Request support for a specific HART command
+labels: ["enhancement", "command"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Request parsing/sending support for a HART command not yet implemented.
+
+  - type: input
+    id: command_number
+    attributes:
+      label: Command number
+      placeholder: "e.g. 34, 42, 59"
+    validations:
+      required: true
+
+  - type: input
+    id: command_name
+    attributes:
+      label: Command name
+      placeholder: "e.g. Write Primary Variable Damping Value"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: direction
+    attributes:
+      label: What do you need?
+      options:
+        - Response parser only
+        - Send + parse (convenience wrapper)
+        - Both
+    validations:
+      required: true
+
+  - type: textarea
+    id: spec
+    attributes:
+      label: Specification reference
+      description: Link to spec, byte layout, or any reference material you have
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Use case
+      description: What device/scenario needs this command?
+    validations:
+      required: false
