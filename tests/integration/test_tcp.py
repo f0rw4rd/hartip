@@ -74,6 +74,8 @@ class TestTCPReadVariables:
         if resp.response_code == HARTResponseCode.SUCCESS:
             var = parse_cmd1(resp.payload)
             assert var is not None
+        else:
+            pytest.fail(f"Command 1 failed with response code {resp.response_code}")
 
     def test_dynamic_variables(self, tcp_client):
         try:
@@ -81,8 +83,10 @@ class TestTCPReadVariables:
         except HARTIPTimeoutError:
             pytest.skip("hipflowapp does not respond to Command 3 over TCP")
         if resp.response_code == HARTResponseCode.SUCCESS:
-            variables = parse_cmd3(resp.payload)
-            assert len(variables) >= 1
+            result = parse_cmd3(resp.payload)
+            assert len(result["variables"]) >= 1
+        else:
+            pytest.fail(f"Command 3 failed with response code {resp.response_code}")
 
 
 class TestTCPMultipleCommands:

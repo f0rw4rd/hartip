@@ -13,7 +13,7 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 CONTAINER_NAME="hartip-test-device"
 
 KEEP=false
-[[ "${1:-}" == "--keep" ]] && KEEP=true
+[[ "${1:-}" == "--keep" ]] && { KEEP=true; shift; }
 
 # ── helpers ────────────────────────────────────────────────────────────
 

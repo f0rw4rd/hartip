@@ -72,6 +72,9 @@ from .protocol import (
 logger = logging.getLogger(__name__)
 
 
+_SENTINEL = object()
+
+
 class HARTIPResponse:
     """Parsed HART-IP response.
 
@@ -95,6 +98,7 @@ class HARTIPResponse:
         "device_status",
         "payload",
         "comm_error",
+        "_parsed_cache",
     )
 
     def __init__(
@@ -112,6 +116,57 @@ class HARTIPResponse:
         self.device_status = device_status
         self.payload = payload
         self.comm_error = comm_error
+        self._parsed_cache = _SENTINEL
+
+    @property
+    def command_number(self) -> int | None:
+        """The HART command number from the PDU, or ``None`` if unavailable."""
+        if self.pdu is not None and hasattr(self.pdu, "command"):
+            return self.pdu.command
+        return None
+
+    @property
+    def command_name(self) -> str:
+        """Human-readable command name from the registry.
+
+        Returns ``"unknown_cmd_{n}"`` when not registered, or ``"unknown"``
+        when the command number is unavailable.
+        """
+        from .device import get_command_name
+
+        cmd = self.command_number
+        if cmd is None:
+            return "unknown"
+        return get_command_name(cmd)
+
+    @property
+    def parsed(self) -> Any:
+        """Auto-parsed payload using the command registry.
+
+        The result is computed lazily on first access and cached.  Returns
+        ``None`` when no parser is registered for the command or when the
+        command number is unavailable.
+
+        Examples::
+
+            resp = client.read_unique_id()
+            info = resp.parsed           # DeviceInfo dataclass
+            print(info.manufacturer_name)
+
+            resp = client.read_dynamic_variables()
+            data = resp.parsed           # dict with 'loop_current' and 'variables'
+        """
+        if self._parsed_cache is not _SENTINEL:
+            return self._parsed_cache
+
+        from .device import parse_command
+
+        cmd = self.command_number
+        if cmd is not None and self.payload:
+            self._parsed_cache = parse_command(cmd, self.payload)
+        else:
+            self._parsed_cache = None
+        return self._parsed_cache
 
     @property
     def success(self) -> bool:
@@ -478,7 +533,12 @@ class HARTIPClient:
         return tls_sock
 
     def _initiate_session(self) -> None:
-        """Send Session Initiate (msg_id=0) and validate the response."""
+        """Send Session Initiate (msg_id=0) and validate the response.
+
+        Per the C# reference, both status 0 (SUCCESS) and status 8
+        (SET_TO_NEAREST_VALUE -- server adjusted the inactivity timer)
+        are accepted as valid session initiation results.
+        """
         frame = build_session_init(
             sequence=self._next_sequence(),
             master_type=self.master_type,
@@ -488,7 +548,11 @@ class HARTIPClient:
         raw = self._send_recv(frame)
         header = HARTIPHeader.parse(raw[:HARTIP_HEADER_SIZE])
 
-        if header.status != HARTIPStatus.SUCCESS:
+        _SESSION_INIT_OK = (
+            HARTIPStatus.SUCCESS,
+            HARTIPStatus.WARNING_SET_TO_NEAREST_VALUE,
+        )
+        if header.status not in _SESSION_INIT_OK:
             try:
                 name = HARTIPStatus(header.status).name
             except ValueError:
@@ -674,7 +738,12 @@ class HARTIPClient:
             addr_bytes = unique_addr[:5]
         else:
             delimiter = HARTFrameType.SHORT_FRAME
-            addr_bytes = bytes([address & 0x0F])
+            # Short frame address byte: bit 7 = primary master flag,
+            # bits 0-5 = polling address (per HART spec & C# reference).
+            if self.master_type == MASTER_TYPE_PRIMARY:
+                addr_bytes = bytes([(address & 0x3F) | 0x80])
+            else:
+                addr_bytes = bytes([address & 0x3F])
 
         # Extended command support (cmd > 253 uses Command 31 wrapper)
         wire_command = command
@@ -874,11 +943,67 @@ class HARTIPClient:
         )
 
     def read_device_vars_status(
+        self,
+        address: int = 0,
+        *,
+        device_var_codes: Sequence[int] = (0, 1, 2, 3),
+        unique_addr: bytes | None = None,
+    ) -> HARTIPResponse:
+        """Command 9: Read Device Variables with Status.
+
+        Args:
+            address: Polling address (0-15) for short frame.
+            device_var_codes: Device variable codes to read (1-8 codes).
+                Defaults to ``(0, 1, 2, 3)`` for PV, SV, TV, QV.
+                The HART spec requires at least 1 code in the request.
+            unique_addr: Explicit 5-byte unique address for long frame.
+
+        Returns:
+            Parsed :class:`HARTIPResponse`.
+        """
+        data = bytes(device_var_codes[:8])
+        return self.send_command(
+            HARTCommand.READ_DEVICE_VARS_STATUS, address, data=data,
+            unique_addr=unique_addr,
+        )
+
+    def write_poll_address(
+        self,
+        poll_address: int,
+        loop_current_mode: int = 0,
+        address: int = 0,
+        *,
+        unique_addr: bytes | None = None,
+    ) -> HARTIPResponse:
+        """Command 6: Write Polling Address.
+
+        Args:
+            poll_address: New polling address (0-63).
+            loop_current_mode: 0=enabled, 1=disabled.
+            address: Polling address for the request frame.
+            unique_addr: Explicit 5-byte unique address for long frame.
+        """
+        data = bytes([poll_address & 0x3F, loop_current_mode & 0x01])
+        return self.send_command(
+            HARTCommand.WRITE_POLL_ADDRESS, address, data=data,
+            unique_addr=unique_addr,
+        )
+
+    def read_loop_config(
         self, address: int = 0, *, unique_addr: bytes | None = None
     ) -> HARTIPResponse:
-        """Command 9: Read Device Variables with Status."""
+        """Command 7: Read Loop Configuration."""
         return self.send_command(
-            HARTCommand.READ_DEVICE_VARS_STATUS, address, unique_addr=unique_addr
+            HARTCommand.READ_LOOP_CONFIG, address, unique_addr=unique_addr
+        )
+
+    def read_dynamic_var_classifications(
+        self, address: int = 0, *, unique_addr: bytes | None = None
+    ) -> HARTIPResponse:
+        """Command 8: Read Dynamic Variable Classifications."""
+        return self.send_command(
+            HARTCommand.READ_DYNAMIC_VAR_CLASSIFICATION, address,
+            unique_addr=unique_addr,
         )
 
     def read_message(
@@ -911,6 +1036,88 @@ class HARTIPClient:
         """Command 15: Read Output Information."""
         return self.send_command(
             HARTCommand.READ_OUTPUT_INFO, address, unique_addr=unique_addr
+        )
+
+    def read_final_assembly(
+        self, address: int = 0, *, unique_addr: bytes | None = None
+    ) -> HARTIPResponse:
+        """Command 16: Read Final Assembly Number."""
+        return self.send_command(
+            HARTCommand.READ_FINAL_ASSEMBLY, address, unique_addr=unique_addr
+        )
+
+    def write_message(
+        self,
+        message: str,
+        address: int = 0,
+        *,
+        unique_addr: bytes | None = None,
+    ) -> HARTIPResponse:
+        """Command 17: Write Message.
+
+        Args:
+            message: Message string (up to 32 characters, packed to 24 bytes).
+            address: Polling address for the request frame.
+            unique_addr: Explicit 5-byte unique address for long frame.
+        """
+        from .ascii import pack_ascii
+
+        packed = pack_ascii(message.ljust(32)[:32])[:24]
+        return self.send_command(
+            HARTCommand.WRITE_MESSAGE, address, data=packed,
+            unique_addr=unique_addr,
+        )
+
+    def write_tag_descriptor_date(
+        self,
+        tag: str,
+        descriptor: str,
+        day: int,
+        month: int,
+        year: int,
+        address: int = 0,
+        *,
+        unique_addr: bytes | None = None,
+    ) -> HARTIPResponse:
+        """Command 18: Write Tag, Descriptor, Date.
+
+        Args:
+            tag: Tag string (up to 8 characters, packed to 6 bytes).
+            descriptor: Descriptor string (up to 16 characters, packed to 12 bytes).
+            day: Day of month (1-31).
+            month: Month (1-12).
+            year: Year offset from 1900 (e.g. 124 for 2024).
+            address: Polling address for the request frame.
+            unique_addr: Explicit 5-byte unique address for long frame.
+        """
+        from .ascii import pack_ascii
+
+        tag_packed = pack_ascii(tag.ljust(8)[:8])[:6]
+        desc_packed = pack_ascii(descriptor.ljust(16)[:16])[:12]
+        data = tag_packed + desc_packed + bytes([day, month, year])
+        return self.send_command(
+            HARTCommand.WRITE_TAG_DESCRIPTOR_DATE, address, data=data,
+            unique_addr=unique_addr,
+        )
+
+    def write_final_assembly(
+        self,
+        assembly_number: int,
+        address: int = 0,
+        *,
+        unique_addr: bytes | None = None,
+    ) -> HARTIPResponse:
+        """Command 19: Write Final Assembly Number.
+
+        Args:
+            assembly_number: Final assembly number (0-16777215, Unsigned-24).
+            address: Polling address for the request frame.
+            unique_addr: Explicit 5-byte unique address for long frame.
+        """
+        data = assembly_number.to_bytes(3, "big")
+        return self.send_command(
+            HARTCommand.WRITE_FINAL_ASSEMBLY, address, data=data,
+            unique_addr=unique_addr,
         )
 
     def read_long_tag(

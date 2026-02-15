@@ -146,6 +146,88 @@ class TestHARTIPClient:
             with pytest.raises(HARTIPConnectionError, match="Session initiate failed"):
                 client.connect()
 
+    def test_session_init_accepts_set_to_nearest(self) -> None:
+        """Session initiate should accept status 8 (set to nearest value).
+
+        Per the C# reference (HARTIPConnect.cs InitSession), the server
+        may adjust the inactivity timer and return status 8. This is a
+        valid session initiation result, not an error.
+        """
+        session_resp = _build_session_init_response(
+            status=HARTIPStatus.WARNING_SET_TO_NEAREST_VALUE,
+        )
+        close_resp = _build_session_close_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.side_effect = [
+                (session_resp, _ADDR),
+                (close_resp, _ADDR),
+            ]
+            client = HARTIPClient("127.0.0.1", protocol="udp")
+            client.connect()
+            assert client.session_active
+            client.close()
+
+    def test_short_frame_primary_master_bit(self) -> None:
+        """Short frame address byte should have primary master bit (0x80) set.
+
+        Per the C# reference (HartClient.cs DiscoverHartDevice), the
+        short frame address byte format is: bit 7 = primary master flag,
+        bits 0-5 = polling address.
+        """
+        session_resp = _build_session_init_response()
+        cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
+        close_resp = _build_session_close_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.side_effect = [
+                (session_resp, _ADDR),
+                (cmd_resp, _ADDR),
+                (close_resp, _ADDR),
+            ]
+
+            client = HARTIPClient("127.0.0.1", protocol="udp")
+            client.connect()
+            resp = client.send_command(0, address=5)
+            # Check the PDU address byte in the sent frame
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            # Short frame: delimiter(1) + addr(1) + cmd(1) + bc(1) + cksum(1)
+            # Address byte at index 1 should be (5 & 0x3F) | 0x80 = 0x85
+            assert pdu_bytes[1] == 0x85
+            client.close()
+
+    def test_short_frame_secondary_master_no_bit(self) -> None:
+        """Secondary master should NOT set bit 7 in short address."""
+        session_resp = _build_session_init_response()
+        cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
+        close_resp = _build_session_close_response()
+
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            mock_sock.recvfrom.side_effect = [
+                (session_resp, _ADDR),
+                (cmd_resp, _ADDR),
+                (close_resp, _ADDR),
+            ]
+
+            from hartip.constants import MASTER_TYPE_SECONDARY
+            client = HARTIPClient(
+                "127.0.0.1", protocol="udp", master_type=MASTER_TYPE_SECONDARY
+            )
+            client.connect()
+            resp = client.send_command(0, address=5)
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            # Secondary master: address byte = 5 & 0x3F = 0x05 (no bit 7)
+            assert pdu_bytes[1] == 0x05
+            client.close()
+
     def test_send_command_udp(self) -> None:
         session_resp = _build_session_init_response()
         cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
@@ -504,6 +586,192 @@ class TestConvenienceMethods:
             cmd_resp = _build_mock_response(command=14, payload=b"\x00" * 16)
             mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
             resp = client.read_pv_info()
+            assert resp.response_code == 0
+
+    def test_read_device_vars_status_sends_var_codes(self) -> None:
+        """Command 9 sends device variable codes in request data."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=9, payload=b"\x00" * 9)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_device_vars_status(device_var_codes=(0, 1))
+            assert resp.response_code == 0
+            # Verify the sent frame includes the 2 var codes in the PDU data
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            # short frame: delimiter(1) + addr(1) + cmd(1) + bc(1) + data + cksum(1)
+            assert pdu_bytes[2] == 9  # command 9
+            assert pdu_bytes[3] == 2  # byte_count = 2 var codes
+            assert pdu_bytes[4] == 0  # var code 0
+            assert pdu_bytes[5] == 1  # var code 1
+
+    def test_read_device_vars_status_default_codes(self) -> None:
+        """Command 9 defaults to PV, SV, TV, QV (codes 0,1,2,3)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=9, payload=b"\x00" * 25)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_device_vars_status()
+            assert resp.response_code == 0
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            assert pdu_bytes[2] == 9
+            assert pdu_bytes[3] == 4  # byte_count = 4 codes
+            assert pdu_bytes[4:8] == bytes([0, 1, 2, 3])
+
+    def test_write_poll_address(self) -> None:
+        """Command 6 sends poll_address and loop_current_mode (2 bytes)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=6, payload=bytes([5, 0]))
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.write_poll_address(5, loop_current_mode=0)
+            assert resp.response_code == 0
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            assert pdu_bytes[2] == 6  # command 6
+            assert pdu_bytes[3] == 2  # byte_count = 2
+            assert pdu_bytes[4] == 5  # poll_address
+            assert pdu_bytes[5] == 0  # loop_current_mode
+
+    def test_write_poll_address_masks_value(self) -> None:
+        """Command 6 masks poll_address to 6 bits (0-63)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=6, payload=bytes([63, 1]))
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.write_poll_address(0xFF, loop_current_mode=1)
+            assert resp.response_code == 0
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            assert pdu_bytes[4] == 0x3F  # masked to 6 bits
+            assert pdu_bytes[5] == 1     # loop_current_mode
+
+    def test_read_loop_config(self) -> None:
+        """Command 7 is a read-only command (no request data)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=7, payload=bytes([0, 0]))
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_loop_config()
+            assert resp.response_code == 0
+
+    def test_read_dynamic_var_classifications(self) -> None:
+        """Command 8 is a read-only command (no request data)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=8, payload=bytes([0, 0, 0, 0]))
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_dynamic_var_classifications()
+            assert resp.response_code == 0
+
+    def test_read_final_assembly(self) -> None:
+        """Command 16 is a read-only command (no request data)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=16, payload=b"\x01\x02\x03")
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_final_assembly()
+            assert resp.response_code == 0
+
+    def test_write_message(self) -> None:
+        """Command 17 sends 24 packed ASCII bytes."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=17, payload=b"\x00" * 24)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.write_message("HELLO WORLD")
+            assert resp.response_code == 0
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            assert pdu_bytes[2] == 17  # command 17
+            assert pdu_bytes[3] == 24  # byte_count = 24 packed bytes
+
+    def test_write_tag_descriptor_date(self) -> None:
+        """Command 18 sends 6+12+3=21 bytes (tag + descriptor + date)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=18, payload=b"\x00" * 21)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.write_tag_descriptor_date(
+                tag="MYTAG", descriptor="DESC", day=15, month=2, year=126
+            )
+            assert resp.response_code == 0
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            assert pdu_bytes[2] == 18  # command 18
+            assert pdu_bytes[3] == 21  # byte_count = 21
+            # Last 3 bytes of data are day, month, year
+            data_start = 4
+            assert pdu_bytes[data_start + 18] == 15   # day
+            assert pdu_bytes[data_start + 19] == 2    # month
+            assert pdu_bytes[data_start + 20] == 126  # year (2026 - 1900)
+
+    def test_write_final_assembly(self) -> None:
+        """Command 19 sends 3-byte big-endian assembly number."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=19, payload=b"\x01\x02\x03")
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.write_final_assembly(0x010203)
+            assert resp.response_code == 0
+            sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
+            pdu_bytes = sent_frame[HARTIP_HEADER_SIZE:]
+            assert pdu_bytes[2] == 19  # command 19
+            assert pdu_bytes[3] == 3   # byte_count = 3
+            assert pdu_bytes[4:7] == bytes([0x01, 0x02, 0x03])  # big-endian
+
+    def test_read_output_info(self) -> None:
+        """Command 15 is a read-only command (no request data)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=15, payload=b"\x00" * 18)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_output_info()
+            assert resp.response_code == 0
+
+    def test_read_tag_descriptor_date(self) -> None:
+        """Command 13 is a read-only command (no request data)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=13, payload=b"\x00" * 21)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_tag_descriptor_date()
+            assert resp.response_code == 0
+
+    def test_read_long_tag(self) -> None:
+        """Command 20 is a read-only command (no request data)."""
+        with patch("hartip.client.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock_cls.return_value = mock_sock
+            client = self._make_connected_client(mock_sock)
+            cmd_resp = _build_mock_response(command=20, payload=b"\x00" * 32)
+            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            resp = client.read_long_tag()
             assert resp.response_code == 0
 
 

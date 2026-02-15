@@ -3,6 +3,7 @@
 from hartip.constants import (
     CMD_EXTENDED_CMD,
     COMM_ERROR_MASK,
+    DEFAULT_INACTIVITY_TIMER,
     DR_MAX_RETRIES,
     DR_RETRY_CODES,
     DR_RETRY_DELAY_MS,
@@ -213,3 +214,7 @@ class TestConstants:
     def test_dr_defaults(self) -> None:
         assert DR_MAX_RETRIES == 100
         assert DR_RETRY_DELAY_MS == 20
+
+    def test_inactivity_timer_matches_csharp_reference(self) -> None:
+        # C# reference: INACTIVITY_CLOSE_TIME = 600000 (10 minutes)
+        assert DEFAULT_INACTIVITY_TIMER == 600000

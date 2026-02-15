@@ -469,7 +469,7 @@ class TestClientAddressHandling:
         # Parse the sent frame to check address
         sent = frames[0]
         pdu = parse_pdu(sent[8:])
-        assert pdu.address == bytes([0x0F])  # 0xFF & 0x0F = 0x0F
+        assert pdu.address == bytes([0xBF])  # (0xFF & 0x3F) | 0x80 = 0xBF (primary master)
 
     def test_use_long_frame_without_addr_raises(self):
         client = HARTIPClient("127.0.0.1")
@@ -1917,7 +1917,7 @@ class TestParseCmd54:
     def _build_payload(self) -> bytes:
         # dv_code(1) + serial(3) + units(1) + upper(4f) + lower(4f) +
         # damping(4f) + min_span(4f) + classification(1) + family(1) +
-        # acq_period(4f) + properties(1)
+        # acq_period(4 uint32, 1/32 ms) + properties(1)
         payload = bytes([0])  # dv_code
         payload += bytes([0, 0, 42])  # serial = 42
         payload += bytes([39])  # units
@@ -1927,7 +1927,7 @@ class TestParseCmd54:
         payload += struct.pack(">f", 0.1)  # min_span
         payload += bytes([64])  # classification
         payload += bytes([0])  # family
-        payload += struct.pack(">f", 0.5)  # acq_period
+        payload += struct.pack(">I", 32000)  # acq_period = 32000 ticks = 1 sec
         payload += bytes([0x03])  # properties
         return payload
 
@@ -1942,7 +1942,7 @@ class TestParseCmd54:
         assert abs(result["minimum_span"] - 0.1) < 1e-5
         assert result["classification"] == 64
         assert result["device_family"] == 0
-        assert abs(result["acquisition_period"] - 0.5) < 1e-5
+        assert result["acquisition_period"] == 32000
         assert result["properties"] == 0x03
 
     def test_minimal_valid(self):

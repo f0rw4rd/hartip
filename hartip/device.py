@@ -713,7 +713,7 @@ def parse_cmd54(payload: bytes) -> dict:
         Bytes 17-20: minimum_span (float)
         Byte 21:     classification
         Byte 22:     device_family
-        Bytes 23-26: acquisition_period (float, seconds)
+        Bytes 23-26: acquisition_period (uint32, 1/32 ms per tick)
         Byte 27:     properties (bit flags, Table 65)
     """
     if len(payload) < 7:
@@ -737,7 +737,7 @@ def parse_cmd54(payload: bytes) -> dict:
     if len(payload) >= 23:
         result["device_family"] = payload[22]
     if len(payload) >= 27:
-        result["acquisition_period"] = Float32b.parse(payload[23:27])
+        result["acquisition_period"] = Int32ub.parse(payload[23:27])
     if len(payload) >= 28:
         result["properties"] = payload[27]
     return result
@@ -1002,3 +1002,144 @@ def parse_cmd534(payload: bytes) -> dict:
         "simulation_value": Float32b.parse(payload[3:7]),
         "device_family": payload[7],
     }
+
+
+# ---------------------------------------------------------------------------
+# Command registry: maps command number -> (parser_function, friendly_name)
+#
+# Modelled after the Wireshark dissect_parse_hart_cmds() switch table and
+# CISAGOV Zeek Spicy CommandNumber enum naming convention.
+# ---------------------------------------------------------------------------
+
+COMMAND_REGISTRY: dict[int, tuple] = {
+    0: (parse_cmd0, "read_unique_id"),
+    1: (parse_cmd1, "read_primary_variable"),
+    2: (parse_cmd2, "read_current_and_percent"),
+    3: (parse_cmd3, "read_dynamic_variables"),
+    6: (parse_cmd6, "write_polling_address"),
+    7: (parse_cmd7, "read_loop_configuration"),
+    8: (parse_cmd8, "read_dynamic_variable_classifications"),
+    9: (parse_cmd9, "read_device_variables_with_status"),
+    11: (parse_cmd11, "read_unique_id_by_tag"),
+    12: (parse_cmd12, "read_message"),
+    13: (parse_cmd13, "read_tag_descriptor_date"),
+    14: (parse_cmd14, "read_pv_transducer_info"),
+    15: (parse_cmd15, "read_output_info"),
+    16: (parse_cmd16, "read_final_assembly_number"),
+    17: (parse_cmd17, "write_message"),
+    18: (parse_cmd18, "write_tag_descriptor_date"),
+    19: (parse_cmd19, "write_final_assembly_number"),
+    20: (parse_cmd20, "read_long_tag"),
+    21: (parse_cmd21, "read_unique_id_by_long_tag"),
+    22: (parse_cmd22, "write_long_tag"),
+    33: (parse_cmd33, "read_device_variables"),
+    35: (parse_cmd35, "write_pv_range_values"),
+    38: (parse_cmd38, "reset_configuration_changed_flag"),
+    44: (parse_cmd44, "write_pv_units"),
+    48: (parse_cmd48, "read_additional_device_status"),
+    52: (parse_cmd52, "set_device_variable_zero"),
+    53: (parse_cmd53, "write_device_variable_units"),
+    54: (parse_cmd54, "read_device_variable_info"),
+    79: (parse_cmd79, "write_device_variable"),
+    90: (parse_cmd90, "read_device_message_timing"),
+    95: (parse_cmd95, "read_device_message_statistics"),
+    103: (parse_cmd103, "write_burst_period"),
+    104: (parse_cmd104, "write_burst_trigger"),
+    105: (parse_cmd105, "read_burst_mode_config"),
+    107: (parse_cmd107, "write_burst_device_variables"),
+    108: (parse_cmd108, "write_burst_command_number"),
+    109: (parse_cmd109, "burst_mode_control"),
+    512: (parse_cmd512, "read_country_code"),
+    513: (parse_cmd513, "write_country_code"),
+    534: (parse_cmd534, "read_device_variable_simulation_status"),
+}
+
+
+def get_parser(command: int):
+    """Look up the parser function for a HART command number.
+
+    Args:
+        command: HART command number.
+
+    Returns:
+        The parser callable, or ``None`` if no parser is registered.
+    """
+    entry = COMMAND_REGISTRY.get(command)
+    if entry is not None:
+        return entry[0]
+    return None
+
+
+def get_command_name(command: int) -> str:
+    """Return the friendly name for a HART command number.
+
+    Args:
+        command: HART command number.
+
+    Returns:
+        Human-readable name string, or ``"unknown_cmd_{n}"`` when not registered.
+    """
+    entry = COMMAND_REGISTRY.get(command)
+    if entry is not None:
+        return entry[1]
+    return f"unknown_cmd_{command}"
+
+
+def parse_command(command: int, payload: bytes):
+    """Parse a HART command response payload using the registry.
+
+    Args:
+        command: HART command number.
+        payload: Raw payload bytes (after response_code and device_status).
+
+    Returns:
+        Parsed result (type depends on the command), or ``None`` if no
+        parser is registered for the given command number.
+    """
+    parser = get_parser(command)
+    if parser is not None:
+        return parser(payload)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Friendly-name aliases for parse functions
+#
+# Follow the CISAGOV Zeek naming convention: parse_{friendly_name}.
+# The parse_cmdNN names continue to work (backward compatible).
+# ---------------------------------------------------------------------------
+
+parse_unique_id = parse_cmd0
+parse_primary_variable = parse_cmd1
+parse_current_and_percent = parse_cmd2
+parse_dynamic_variables = parse_cmd3
+parse_polling_address = parse_cmd6
+parse_loop_configuration = parse_cmd7
+parse_dynamic_variable_classifications = parse_cmd8
+parse_device_variables_with_status = parse_cmd9
+parse_unique_id_by_tag = parse_cmd11
+parse_message = parse_cmd12
+parse_tag_descriptor_date = parse_cmd13
+parse_pv_transducer_info = parse_cmd14
+parse_output_info = parse_cmd15
+parse_final_assembly_number = parse_cmd16
+parse_long_tag = parse_cmd20
+parse_device_variables = parse_cmd33
+parse_pv_range_values = parse_cmd35
+parse_reset_config_flag = parse_cmd38
+parse_pv_units = parse_cmd44
+parse_additional_device_status = parse_cmd48
+parse_set_device_variable_zero = parse_cmd52
+parse_device_variable_units = parse_cmd53
+parse_device_variable_info = parse_cmd54
+parse_write_device_variable = parse_cmd79
+parse_device_message_timing = parse_cmd90
+parse_device_message_statistics = parse_cmd95
+parse_burst_period = parse_cmd103
+parse_burst_trigger = parse_cmd104
+parse_burst_mode_config = parse_cmd105
+parse_burst_device_variables = parse_cmd107
+parse_burst_command_number = parse_cmd108
+parse_burst_mode_control = parse_cmd109
+parse_country_code = parse_cmd512
+parse_device_variable_simulation_status = parse_cmd534

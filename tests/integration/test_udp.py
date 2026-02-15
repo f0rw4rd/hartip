@@ -109,9 +109,9 @@ class TestReadDynamicVariables:
         except HARTIPTimeoutError:
             pytest.skip("hipflowapp does not respond to Command 3")
         if resp.response_code == HARTResponseCode.SUCCESS:
-            variables = parse_cmd3(resp.payload)
-            assert len(variables) >= 1
-            for var in variables:
+            result = parse_cmd3(resp.payload)
+            assert len(result["variables"]) >= 1
+            for var in result["variables"]:
                 assert var.label in ("PV", "SV", "TV", "QV")
 
 

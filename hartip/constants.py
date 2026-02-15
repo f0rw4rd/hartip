@@ -50,7 +50,8 @@ MASTER_TYPE_PRIMARY = 1
 MASTER_TYPE_SECONDARY = 0
 
 # Default inactivity close timer (milliseconds)
-DEFAULT_INACTIVITY_TIMER = 30000
+# C# reference: INACTIVITY_CLOSE_TIME = 600000 (10 minutes)
+DEFAULT_INACTIVITY_TIMER = 600000
 
 
 class HARTIPStatus(IntEnum):

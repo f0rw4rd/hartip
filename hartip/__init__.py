@@ -8,12 +8,18 @@ Supports both HART-IP v1 (plaintext) and v2 (TLS/DTLS, Direct PDU, Audit Log).
 
 Quickstart::
 
-    from hartip import HARTIPClient, parse_cmd0
+    from hartip import HARTIPClient
 
     with HARTIPClient("192.168.1.100") as client:
         resp = client.read_unique_id()
-        info = parse_cmd0(resp.payload)
+        info = resp.parsed  # auto-parses Command 0 payload
         print(info.manufacturer_name, info.device_id)
+
+    # Friendly-name parsers also available:
+    from hartip import parse_unique_id, parse_additional_device_status
+
+    # Or the classic parse_cmdNN names still work:
+    from hartip import parse_cmd0, parse_cmd48
 
     # v2 Direct PDU
     from hartip.v2 import DirectPDUCommand
@@ -51,11 +57,19 @@ from .constants import (
     HARTResponseCode,
 )
 from .device import (
+    # Registry and dispatch
+    COMMAND_REGISTRY,
+    get_command_name,
+    get_parser,
+    parse_command,
+    # Dataclasses
     DeviceInfo,
     DeviceVariable,
     Variable,
+    # Utilities
     decode_comm_error_flags,
     is_comm_error,
+    # --- parse_cmdNN functions (backward compatible) ---
     parse_cmd0,
     parse_cmd1,
     parse_cmd2,
@@ -96,6 +110,41 @@ from .device import (
     parse_cmd512,
     parse_cmd513,
     parse_cmd534,
+    # --- Friendly-name aliases ---
+    parse_unique_id,
+    parse_primary_variable,
+    parse_current_and_percent,
+    parse_dynamic_variables,
+    parse_polling_address,
+    parse_loop_configuration,
+    parse_dynamic_variable_classifications,
+    parse_device_variables_with_status,
+    parse_unique_id_by_tag,
+    parse_message,
+    parse_tag_descriptor_date,
+    parse_pv_transducer_info,
+    parse_output_info,
+    parse_final_assembly_number,
+    parse_long_tag,
+    parse_device_variables,
+    parse_pv_range_values,
+    parse_reset_config_flag,
+    parse_pv_units,
+    parse_additional_device_status,
+    parse_set_device_variable_zero,
+    parse_device_variable_units,
+    parse_device_variable_info,
+    parse_write_device_variable,
+    parse_device_message_timing,
+    parse_device_message_statistics,
+    parse_burst_period,
+    parse_burst_trigger,
+    parse_burst_mode_config,
+    parse_burst_device_variables,
+    parse_burst_command_number,
+    parse_burst_mode_control,
+    parse_country_code,
+    parse_device_variable_simulation_status,
 )
 from .exceptions import (
     HARTChecksumError,
@@ -186,12 +235,18 @@ __all__ = [
     "MASTER_TYPE_PRIMARY",
     "MASTER_TYPE_SECONDARY",
     "DEFAULT_INACTIVITY_TIMER",
+    # Command registry and dispatch
+    "COMMAND_REGISTRY",
+    "get_parser",
+    "get_command_name",
+    "parse_command",
     # Device / parsing
     "DeviceInfo",
     "DeviceVariable",
     "Variable",
     "is_comm_error",
     "decode_comm_error_flags",
+    # parse_cmdNN (backward compatible)
     "parse_cmd0",
     "parse_cmd1",
     "parse_cmd2",
@@ -232,6 +287,41 @@ __all__ = [
     "parse_cmd512",
     "parse_cmd513",
     "parse_cmd534",
+    # Friendly-name parse aliases
+    "parse_unique_id",
+    "parse_primary_variable",
+    "parse_current_and_percent",
+    "parse_dynamic_variables",
+    "parse_polling_address",
+    "parse_loop_configuration",
+    "parse_dynamic_variable_classifications",
+    "parse_device_variables_with_status",
+    "parse_unique_id_by_tag",
+    "parse_message",
+    "parse_tag_descriptor_date",
+    "parse_pv_transducer_info",
+    "parse_output_info",
+    "parse_final_assembly_number",
+    "parse_long_tag",
+    "parse_device_variables",
+    "parse_pv_range_values",
+    "parse_reset_config_flag",
+    "parse_pv_units",
+    "parse_additional_device_status",
+    "parse_set_device_variable_zero",
+    "parse_device_variable_units",
+    "parse_device_variable_info",
+    "parse_write_device_variable",
+    "parse_device_message_timing",
+    "parse_device_message_statistics",
+    "parse_burst_period",
+    "parse_burst_trigger",
+    "parse_burst_mode_config",
+    "parse_burst_device_variables",
+    "parse_burst_command_number",
+    "parse_burst_mode_control",
+    "parse_country_code",
+    "parse_device_variable_simulation_status",
     # ASCII
     "pack_ascii",
     "unpack_ascii",
