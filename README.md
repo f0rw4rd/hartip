@@ -140,6 +140,12 @@ pytest
 pytest -m integration
 ```
 
+## Support
+
+If you find this project useful, consider supporting development:
+
+[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/f0rw4rd)
+
 ## License
 
 GPL-3.0-only
