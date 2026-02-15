@@ -74,6 +74,10 @@ logger = logging.getLogger(__name__)
 
 _SENTINEL = object()
 
+#: Sentinel used for convenience-method address parameters so that ``None``
+#: can be explicitly passed by the caller to mean "no unique address".
+_UNSET: Any = object()
+
 
 class HARTIPResponse:
     """Parsed HART-IP response.
@@ -249,6 +253,12 @@ class HARTIPClient:
         tls: Explicitly enable TLS wrapping for TCP connections.
             If ``None`` (default), TLS is enabled automatically when
             ``version=2`` and ``protocol="tcp"``.
+        starttls: Use a STARTTLS-like upgrade model for TLS (default
+            ``True``).  Per HCF_SPEC-085 (HART-IP v2), the Session
+            Initiate is exchanged in plaintext and TLS is negotiated
+            immediately afterwards.  Set to ``False`` to wrap the
+            socket in TLS **before** sending the Session Initiate
+            (non-standard, for servers that expect TLS from the start).
         psk_identity: PSK identity string for TLS-PSK authentication.
         psk_key: PSK key bytes (16 bytes for AES-128) for TLS-PSK.
         ciphers: TLS cipher suite string (e.g. ``HARTIP_V2_PSK_CIPHERS``).
@@ -275,7 +285,7 @@ class HARTIPClient:
             resp = client.read_unique_id()
             info = parse_cmd0(resp.payload)
 
-        # v2 with TLS-PSK over TCP
+        # v2 with TLS-PSK over TCP (STARTTLS -- spec-compliant default)
         with HARTIPClient("192.168.1.100", protocol="tcp", version=2,
                           psk_identity="client1", psk_key=b"\\x00" * 16) as client:
             resp = client.read_unique_id()
@@ -294,6 +304,7 @@ class HARTIPClient:
         dr_retry_delay: int = DR_RETRY_DELAY_MS,
         version: int = HARTIPVersion.V1,
         tls: bool | None = None,
+        starttls: bool = True,
         psk_identity: str | None = None,
         psk_key: bytes | None = None,
         ciphers: str | None = None,
@@ -313,6 +324,7 @@ class HARTIPClient:
         self.dr_retries = dr_retries
         self.dr_retry_delay = dr_retry_delay
         self.version = version
+        self._starttls = starttls
         self._psk_identity = psk_identity
         self._psk_key = psk_key
         self._ciphers = ciphers
@@ -343,9 +355,17 @@ class HARTIPClient:
                 stacklevel=2,
             )
 
+        # Default address for convenience methods.  Users may set these
+        # after connecting so that address/unique_addr need not be passed
+        # on every call.  ``read_unique_id()`` auto-populates
+        # ``default_unique_addr`` on success.
+        self.default_address: int = 0
+        self.default_unique_addr: bytes | None = None
+
         self._socket: socket.socket | None = None
         self._connected = False
         self._session_active = False
+        self.server_version: int | None = None
         self._sequence = 0
         self._lock = threading.Lock()
 
@@ -387,9 +407,18 @@ class HARTIPClient:
         If already connected, the existing connection is closed first to
         avoid leaking the socket.
 
-        For HART-IP v2 with ``tls=True`` (or ``version=2`` over TCP),
-        the TCP socket is wrapped in TLS 1.2+ with the configured cipher
-        suites and optional PSK authentication.
+        For HART-IP v2 with TLS enabled (the default for ``version=2``
+        over TCP), the connection follows the HCF_SPEC-085 STARTTLS
+        model by default:
+
+        1. TCP connect (plaintext)
+        2. Session Initiate exchanged in plaintext
+        3. Socket upgraded to TLS (``_wrap_tls``)
+        4. All subsequent traffic is encrypted
+
+        When ``starttls=False``, TLS is established before the Session
+        Initiate (non-standard, for servers that expect TLS from the
+        start).
 
         Raises:
             HARTIPConnectionError: On socket or session failure.
@@ -405,9 +434,11 @@ class HARTIPClient:
                 raw_sock.settimeout(self.timeout)
                 raw_sock.connect((self.host, self.port))
 
-                if self._use_tls:
+                if self._use_tls and not self._starttls:
+                    # Direct TLS: wrap before session initiate (non-standard)
                     self._socket = self._wrap_tls(raw_sock)
                 else:
+                    # Plaintext or STARTTLS: use raw socket initially
                     self._socket = raw_sock
             else:
                 self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -429,6 +460,15 @@ class HARTIPClient:
         except Exception:
             self.close()
             raise
+
+        # STARTTLS upgrade: session init was exchanged in plaintext,
+        # now upgrade the live socket to TLS before any further traffic.
+        if self._use_tls and self._starttls and self.protocol == "tcp":
+            try:
+                self._socket = self._wrap_tls(self._socket)
+            except Exception:
+                self.close()
+                raise
 
         # Start keep-alive thread if requested
         if self.auto_keepalive and self.inactivity_timer > 0:
@@ -454,6 +494,13 @@ class HARTIPClient:
         if ctx is None:
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+
+            # PSK cipher suites use the TLS 1.2 API in OpenSSL; most
+            # HART-IP servers (including hipserver) only register the
+            # legacy psk_server_callback which is not invoked for TLS 1.3.
+            # Cap at TLS 1.2 when PSK credentials are provided.
+            if self._psk_identity is not None and self._psk_key is not None:
+                ctx.maximum_version = ssl.TLSVersion.TLSv1_2
 
             # Load CA certs for server verification if provided
             if self._ca_certs is not None:
@@ -560,6 +607,7 @@ class HARTIPClient:
             self.close()
             raise HARTIPConnectionError(f"Session initiate failed: {name}")
 
+        self.server_version = header.version
         self._session_active = True
 
     def _close_session(self) -> None:
@@ -569,8 +617,8 @@ class HARTIPClient:
         try:
             frame = build_session_close(sequence=self._next_sequence(), version=self.version)
             self._send_recv(frame)
-        except (OSError, HARTIPTimeoutError):
-            pass  # best-effort
+        except (OSError, HARTIPTimeoutError, HARTIPConnectionError):
+            pass  # best-effort; socket may already be closed (e.g. STARTTLS failure)
         self._session_active = False
 
     def close(self) -> None:
@@ -898,42 +946,70 @@ class HARTIPClient:
             comm_error=comm_error,
         )
 
+    # -- address resolution ---------------------------------------------------
+
+    def _resolve_addr(
+        self,
+        address: Any,
+        unique_addr: Any,
+    ) -> tuple[int, bytes | None]:
+        """Resolve address/unique_addr from explicit args or instance defaults.
+
+        When the caller passes ``_UNSET`` (the default in convenience methods),
+        the instance-level ``default_address`` / ``default_unique_addr`` are
+        used.  An explicit value (including ``None``) always takes precedence.
+        """
+        effective_address = self.default_address if address is _UNSET else address
+        effective_unique = self.default_unique_addr if unique_addr is _UNSET else unique_addr
+        return effective_address, effective_unique
+
     # -- convenience wrappers ------------------------------------------------
 
-    def read_unique_id(
-        self, address: int = 0, *, unique_addr: bytes | None = None
-    ) -> HARTIPResponse:
-        """Command 0: Read Unique Identifier."""
-        return self.send_command(HARTCommand.READ_UNIQUE_ID, address, unique_addr=unique_addr)
+    def read_unique_id(self, address: Any = _UNSET, *, unique_addr: Any = _UNSET) -> HARTIPResponse:
+        """Command 0: Read Unique Identifier.
+
+        On success, auto-populates :attr:`default_unique_addr` from the
+        parsed response so subsequent calls can omit the address.
+        """
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        resp = self.send_command(HARTCommand.READ_UNIQUE_ID, addr, unique_addr=uniq)
+
+        # Auto-populate default_unique_addr from a successful Command 0
+        if resp.success and resp.payload:
+            from .device import parse_cmd0
+
+            info = parse_cmd0(resp.payload)
+            if info.unique_address:
+                self.default_unique_addr = info.unique_address
+        return resp
 
     def read_primary_variable(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 1: Read Primary Variable."""
-        return self.send_command(
-            HARTCommand.READ_PRIMARY_VARIABLE, address, unique_addr=unique_addr
-        )
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_PRIMARY_VARIABLE, addr, unique_addr=uniq)
 
     def read_current_and_percent(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 2: Read Loop Current and Percent of Range."""
-        return self.send_command(
-            HARTCommand.READ_CURRENT_AND_PERCENT, address, unique_addr=unique_addr
-        )
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_CURRENT_AND_PERCENT, addr, unique_addr=uniq)
 
     def read_dynamic_variables(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 3: Read Dynamic Variables."""
-        return self.send_command(HARTCommand.READ_DYNAMIC_VARS, address, unique_addr=unique_addr)
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_DYNAMIC_VARS, addr, unique_addr=uniq)
 
     def read_device_vars_status(
         self,
-        address: int = 0,
+        address: Any = _UNSET,
         *,
         device_var_codes: Sequence[int] = (0, 1, 2, 3),
-        unique_addr: bytes | None = None,
+        unique_addr: Any = _UNSET,
     ) -> HARTIPResponse:
         """Command 9: Read Device Variables with Status.
 
@@ -947,21 +1023,22 @@ class HARTIPClient:
         Returns:
             Parsed :class:`HARTIPResponse`.
         """
+        addr, uniq = self._resolve_addr(address, unique_addr)
         data = bytes(device_var_codes[:8])
         return self.send_command(
             HARTCommand.READ_DEVICE_VARS_STATUS,
-            address,
+            addr,
             data=data,
-            unique_addr=unique_addr,
+            unique_addr=uniq,
         )
 
     def write_poll_address(
         self,
         poll_address: int,
         loop_current_mode: int = 0,
-        address: int = 0,
+        address: Any = _UNSET,
         *,
-        unique_addr: bytes | None = None,
+        unique_addr: Any = _UNSET,
     ) -> HARTIPResponse:
         """Command 6: Write Polling Address.
 
@@ -971,66 +1048,70 @@ class HARTIPClient:
             address: Polling address for the request frame.
             unique_addr: Explicit 5-byte unique address for long frame.
         """
+        addr, uniq = self._resolve_addr(address, unique_addr)
         data = bytes([poll_address & 0x3F, loop_current_mode & 0x01])
         return self.send_command(
             HARTCommand.WRITE_POLL_ADDRESS,
-            address,
+            addr,
             data=data,
-            unique_addr=unique_addr,
+            unique_addr=uniq,
         )
 
     def read_loop_config(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 7: Read Loop Configuration."""
-        return self.send_command(HARTCommand.READ_LOOP_CONFIG, address, unique_addr=unique_addr)
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_LOOP_CONFIG, addr, unique_addr=uniq)
 
     def read_dynamic_var_classifications(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 8: Read Dynamic Variable Classifications."""
+        addr, uniq = self._resolve_addr(address, unique_addr)
         return self.send_command(
             HARTCommand.READ_DYNAMIC_VAR_CLASSIFICATION,
-            address,
-            unique_addr=unique_addr,
+            addr,
+            unique_addr=uniq,
         )
 
-    def read_message(self, address: int = 0, *, unique_addr: bytes | None = None) -> HARTIPResponse:
+    def read_message(self, address: Any = _UNSET, *, unique_addr: Any = _UNSET) -> HARTIPResponse:
         """Command 12: Read Message (24-byte packed ASCII)."""
-        return self.send_command(HARTCommand.READ_MESSAGE, address, unique_addr=unique_addr)
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_MESSAGE, addr, unique_addr=uniq)
 
     def read_tag_descriptor_date(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 13: Read Tag, Descriptor, Date."""
-        return self.send_command(
-            HARTCommand.READ_TAG_DESCRIPTOR_DATE, address, unique_addr=unique_addr
-        )
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_TAG_DESCRIPTOR_DATE, addr, unique_addr=uniq)
 
-    def read_pv_info(self, address: int = 0, *, unique_addr: bytes | None = None) -> HARTIPResponse:
+    def read_pv_info(self, address: Any = _UNSET, *, unique_addr: Any = _UNSET) -> HARTIPResponse:
         """Command 14: Read Primary Variable Transducer Information."""
-        return self.send_command(
-            HARTCommand.READ_PRIMARY_VAR_INFO, address, unique_addr=unique_addr
-        )
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_PRIMARY_VAR_INFO, addr, unique_addr=uniq)
 
     def read_output_info(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 15: Read Output Information."""
-        return self.send_command(HARTCommand.READ_OUTPUT_INFO, address, unique_addr=unique_addr)
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_OUTPUT_INFO, addr, unique_addr=uniq)
 
     def read_final_assembly(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 16: Read Final Assembly Number."""
-        return self.send_command(HARTCommand.READ_FINAL_ASSEMBLY, address, unique_addr=unique_addr)
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_FINAL_ASSEMBLY, addr, unique_addr=uniq)
 
     def write_message(
         self,
         message: str,
-        address: int = 0,
+        address: Any = _UNSET,
         *,
-        unique_addr: bytes | None = None,
+        unique_addr: Any = _UNSET,
     ) -> HARTIPResponse:
         """Command 17: Write Message.
 
@@ -1041,12 +1122,13 @@ class HARTIPClient:
         """
         from .ascii import pack_ascii
 
+        addr, uniq = self._resolve_addr(address, unique_addr)
         packed = pack_ascii(message.ljust(32)[:32])[:24]
         return self.send_command(
             HARTCommand.WRITE_MESSAGE,
-            address,
+            addr,
             data=packed,
-            unique_addr=unique_addr,
+            unique_addr=uniq,
         )
 
     def write_tag_descriptor_date(
@@ -1056,9 +1138,9 @@ class HARTIPClient:
         day: int,
         month: int,
         year: int,
-        address: int = 0,
+        address: Any = _UNSET,
         *,
-        unique_addr: bytes | None = None,
+        unique_addr: Any = _UNSET,
     ) -> HARTIPResponse:
         """Command 18: Write Tag, Descriptor, Date.
 
@@ -1073,22 +1155,23 @@ class HARTIPClient:
         """
         from .ascii import pack_ascii
 
+        addr, uniq = self._resolve_addr(address, unique_addr)
         tag_packed = pack_ascii(tag.ljust(8)[:8])[:6]
         desc_packed = pack_ascii(descriptor.ljust(16)[:16])[:12]
         data = tag_packed + desc_packed + bytes([day, month, year])
         return self.send_command(
             HARTCommand.WRITE_TAG_DESCRIPTOR_DATE,
-            address,
+            addr,
             data=data,
-            unique_addr=unique_addr,
+            unique_addr=uniq,
         )
 
     def write_final_assembly(
         self,
         assembly_number: int,
-        address: int = 0,
+        address: Any = _UNSET,
         *,
-        unique_addr: bytes | None = None,
+        unique_addr: Any = _UNSET,
     ) -> HARTIPResponse:
         """Command 19: Write Final Assembly Number.
 
@@ -1097,40 +1180,40 @@ class HARTIPClient:
             address: Polling address for the request frame.
             unique_addr: Explicit 5-byte unique address for long frame.
         """
+        addr, uniq = self._resolve_addr(address, unique_addr)
         data = assembly_number.to_bytes(3, "big")
         return self.send_command(
             HARTCommand.WRITE_FINAL_ASSEMBLY,
-            address,
+            addr,
             data=data,
-            unique_addr=unique_addr,
+            unique_addr=uniq,
         )
 
-    def read_long_tag(
-        self, address: int = 0, *, unique_addr: bytes | None = None
-    ) -> HARTIPResponse:
+    def read_long_tag(self, address: Any = _UNSET, *, unique_addr: Any = _UNSET) -> HARTIPResponse:
         """Command 20: Read Long Tag (HART 6+)."""
-        return self.send_command(HARTCommand.READ_LONG_TAG, address, unique_addr=unique_addr)
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_LONG_TAG, addr, unique_addr=uniq)
 
     def read_additional_status(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 48: Read Additional Transmitter Status."""
-        return self.send_command(
-            HARTCommand.READ_ADDITIONAL_STATUS, address, unique_addr=unique_addr
-        )
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_ADDITIONAL_STATUS, addr, unique_addr=uniq)
 
     def perform_self_test(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 41: Perform Device Self-Test."""
-        return self.send_command(HARTCommand.PERFORM_SELF_TEST, address, unique_addr=unique_addr)
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.PERFORM_SELF_TEST, addr, unique_addr=uniq)
 
     def lock_device(
         self,
         lock_code: int = 1,
-        address: int = 0,
+        address: Any = _UNSET,
         *,
-        unique_addr: bytes | None = None,
+        unique_addr: Any = _UNSET,
     ) -> HARTIPResponse:
         """Command 71: Lock Device.
 
@@ -1140,19 +1223,20 @@ class HARTIPClient:
             address: Polling address for the request frame.
             unique_addr: Explicit 5-byte unique address for long frame.
         """
+        addr, uniq = self._resolve_addr(address, unique_addr)
         data = bytes([lock_code & 0xFF])
         return self.send_command(
             HARTCommand.LOCK_DEVICE,
-            address,
+            addr,
             data=data,
-            unique_addr=unique_addr,
+            unique_addr=uniq,
         )
 
     def unlock_device(
         self,
-        address: int = 0,
+        address: Any = _UNSET,
         *,
-        unique_addr: bytes | None = None,
+        unique_addr: Any = _UNSET,
     ) -> HARTIPResponse:
         """Command 71: Unlock Device (convenience for lock_device with code 0).
 
@@ -1163,12 +1247,11 @@ class HARTIPClient:
         return self.lock_device(lock_code=0, address=address, unique_addr=unique_addr)
 
     def read_lock_state(
-        self, address: int = 0, *, unique_addr: bytes | None = None
+        self, address: Any = _UNSET, *, unique_addr: Any = _UNSET
     ) -> HARTIPResponse:
         """Command 76: Read Lock Device State."""
-        return self.send_command(
-            HARTCommand.READ_LOCK_DEVICE_STATE, address, unique_addr=unique_addr
-        )
+        addr, uniq = self._resolve_addr(address, unique_addr)
+        return self.send_command(HARTCommand.READ_LOCK_DEVICE_STATE, addr, unique_addr=uniq)
 
     # -- v2 convenience wrappers (msg_id=4, msg_id=5) -----------------------
 
@@ -1279,3 +1362,81 @@ class HARTIPClient:
 
         payload = raw[HARTIP_HEADER_SIZE:]
         return parse_audit_log_response(payload)
+
+
+def probe_server_version(
+    host: str,
+    port: int = HARTIP_TCP_PORT,
+    *,
+    timeout: float = 3.0,
+) -> int:
+    """Probe a HART-IP server to discover its protocol version.
+
+    Sends a version-2 Session Initiate over TCP and inspects the
+    response status to determine TLS capability:
+
+    - ``status=0`` (SUCCESS) → server supports v2 (TLS)
+    - ``status=9`` (ERROR_SECURITY_NOT_INITIALIZED) → server is v1 only
+
+    The session is immediately closed without TLS negotiation.
+
+    Args:
+        host: Target device hostname or IP address.
+        port: Target TCP port (default 5094).
+        timeout: Socket timeout in seconds.
+
+    Returns:
+        The server's HART-IP version (1 or 2).
+
+    Raises:
+        HARTIPConnectionError: On socket failure.
+        HARTIPTimeoutError: No response within timeout.
+    """
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+    except OSError as exc:
+        raise HARTIPConnectionError(f"Failed to connect to {host}:{port}: {exc}") from exc
+
+    try:
+        # Send session init with version=2 — both v1 and v2 servers respond
+        frame = build_session_init(sequence=1, master_type=1, inactivity_timer=5000, version=2)
+        sock.sendall(frame)
+
+        # Read the 8-byte header
+        buf = bytearray()
+        while len(buf) < HARTIP_HEADER_SIZE:
+            chunk = sock.recv(HARTIP_HEADER_SIZE - len(buf))
+            if not chunk:
+                raise HARTIPConnectionError("Connection closed during version probe")
+            buf.extend(chunk)
+
+        header = HARTIPHeader.parse(bytes(buf))
+
+        # Drain any remaining body bytes
+        remaining = header.byte_count - HARTIP_HEADER_SIZE
+        while remaining > 0:
+            chunk = sock.recv(remaining)
+            if not chunk:
+                break
+            remaining -= len(chunk)
+
+        # status 9 = ERROR_SECURITY_NOT_INITIALIZED → v1 server
+        if header.status == HARTIPStatus.ERROR_SECURITY_NOT_INITIALIZED:
+            return HARTIPVersion.V1
+        # status 0 = SUCCESS → server accepted v2
+        return header.version
+
+    except TimeoutError as exc:
+        raise HARTIPTimeoutError("Version probe timed out") from exc
+    except OSError as exc:
+        raise HARTIPConnectionError(f"Version probe failed: {exc}") from exc
+    finally:
+        # Best-effort session close, then tear down
+        try:
+            close_frame = build_session_close(sequence=2, version=2)
+            sock.sendall(close_frame)
+        except OSError:
+            pass
+        sock.close()

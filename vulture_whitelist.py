@@ -34,6 +34,8 @@ DeviceInfo.long_tag
 DeviceInfo.write_protected
 DeviceInfo.config_changed
 DeviceInfo.physical_signaling_name
+DeviceInfo.flags_decoded
+DeviceInfo.extended_device_status_decoded
 
 Variable.value
 Variable.unit_code
@@ -47,6 +49,8 @@ DeviceVariable.unit_code
 DeviceVariable.unit_name
 DeviceVariable.value
 DeviceVariable.status
+DeviceVariable.classification_name
+DeviceVariable.status_decoded
 
 # -- Enum members used by callers, not always internally --
 
@@ -81,6 +85,14 @@ HARTIPClient.psk_identity
 HARTIPClient.psk_key
 HARTIPClient.connected
 HARTIPClient.session_active
+HARTIPClient.default_address
+HARTIPClient.default_unique_addr
+HARTIPClient.server_version
+
+# -- Standalone utility functions --
+from hartip.client import probe_server_version
+
+probe_server_version
 
 # -- HARTIPResponse properties --
 from hartip.client import HARTIPResponse
@@ -134,6 +146,102 @@ PduContainer.expansion_bytes
 
 # -- ASCII helpers --
 
-# -- Lookup tables --
+# -- Lookup tables and bitfield decoders --
+from hartip.lookups import (
+    ALARM_SELECTION_CODES,
+    CLASSIFICATION_CODES,
+    DEVICE_FAMILY_CODES,
+    HART_TICKS_PER_SECOND,
+    OPERATING_MODE_CODES,
+    TRANSFER_FUNCTION_CODES,
+    WRITE_PROTECT_CODES,
+    decode_cmd0_flags,
+    decode_device_status,
+    decode_device_variable_status,
+    decode_extended_device_status,
+    decode_standardized_status_0,
+    decode_standardized_status_1,
+    decode_standardized_status_2,
+    decode_standardized_status_3,
+    get_alarm_selection_name,
+    get_classification_name,
+    get_device_family_name,
+    get_operating_mode_name,
+    get_transfer_function_name,
+    get_write_protect_name,
+    hart_ticks_to_seconds,
+    hart_ticks_to_timedelta,
+)
+
+ALARM_SELECTION_CODES
+CLASSIFICATION_CODES
+DEVICE_FAMILY_CODES
+HART_TICKS_PER_SECOND
+OPERATING_MODE_CODES
+TRANSFER_FUNCTION_CODES
+WRITE_PROTECT_CODES
+decode_cmd0_flags
+decode_device_status
+decode_device_variable_status
+decode_extended_device_status
+decode_standardized_status_0
+decode_standardized_status_1
+decode_standardized_status_2
+decode_standardized_status_3
+get_alarm_selection_name
+get_classification_name
+get_device_family_name
+get_operating_mode_name
+get_transfer_function_name
+get_write_protect_name
+hart_ticks_to_seconds
+hart_ticks_to_timedelta
+
+# -- High-level Device class --
+from hartip.high_level import Device
+
+Device.client
+Device.info
+Device.tag
+Device.descriptor
+Device.date
+Device.long_tag
+Device.manufacturer_name
+Device.manufacturer_id
+Device.device_type
+Device.device_id
+Device.unique_address
+Device.hart_revision
+Device.software_revision
+Device.hardware_revision
+Device.primary_variable
+Device.loop_current
+Device.percent_range
+Device.dynamic_variables
+Device.device_variables
+Device.status
+Device.additional_status
+Device.message
+
+# -- TypedDict response types --
+from hartip.types import (
+    Cmd2Response,
+    Cmd3Response,
+    Cmd8Response,
+    Cmd9Response,
+    Cmd13Response,
+    Cmd15Response,
+    Cmd48Response,
+    Cmd54Response,
+)
+
+Cmd2Response
+Cmd3Response
+Cmd8Response
+Cmd9Response
+Cmd13Response
+Cmd15Response
+Cmd48Response
+Cmd54Response
 
 # -- v2 builders/parsers --

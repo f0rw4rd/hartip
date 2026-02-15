@@ -32,7 +32,7 @@ Quickstart::
 """
 
 from .ascii import pack_ascii, unpack_ascii
-from .client import HARTIPClient, HARTIPResponse
+from .client import HARTIPClient, HARTIPResponse, probe_server_version
 from .constants import (
     COMM_ERROR_MASK,
     DEFAULT_INACTIVITY_TIMER,
@@ -165,6 +165,32 @@ from .exceptions import (
     HARTProtocolError,
     HARTResponseError,
 )
+from .high_level import Device
+from .lookups import (
+    ALARM_SELECTION_CODES,
+    CLASSIFICATION_CODES,
+    DEVICE_FAMILY_CODES,
+    HART_TICKS_PER_SECOND,
+    OPERATING_MODE_CODES,
+    TRANSFER_FUNCTION_CODES,
+    WRITE_PROTECT_CODES,
+    decode_cmd0_flags,
+    decode_device_status,
+    decode_device_variable_status,
+    decode_extended_device_status,
+    decode_standardized_status_0,
+    decode_standardized_status_1,
+    decode_standardized_status_2,
+    decode_standardized_status_3,
+    get_alarm_selection_name,
+    get_classification_name,
+    get_device_family_name,
+    get_operating_mode_name,
+    get_transfer_function_name,
+    get_write_protect_name,
+    hart_ticks_to_seconds,
+    hart_ticks_to_timedelta,
+)
 from .protocol import (
     HARTIPHeader,
     HARTPdu,
@@ -177,6 +203,16 @@ from .protocol import (
     parse_pdu,
     parse_response,
     xor_checksum,
+)
+from .types import (
+    Cmd2Response,
+    Cmd3Response,
+    Cmd8Response,
+    Cmd9Response,
+    Cmd13Response,
+    Cmd15Response,
+    Cmd48Response,
+    Cmd54Response,
 )
 from .units import UNITS, get_unit_name
 from .v2 import (
@@ -192,12 +228,24 @@ from .v2 import (
 )
 from .vendors import MANUFACTURERS, get_vendor_name
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # Client
     "HARTIPClient",
     "HARTIPResponse",
+    "probe_server_version",
+    # High-level
+    "Device",
+    # Typed response dicts
+    "Cmd2Response",
+    "Cmd3Response",
+    "Cmd8Response",
+    "Cmd9Response",
+    "Cmd13Response",
+    "Cmd15Response",
+    "Cmd48Response",
+    "Cmd54Response",
     # Protocol structs (v1)
     "HARTIPHeader",
     "HARTPdu",
@@ -342,8 +390,33 @@ __all__ = [
     # Lookup tables
     "MANUFACTURERS",
     "UNITS",
+    "CLASSIFICATION_CODES",
+    "TRANSFER_FUNCTION_CODES",
+    "OPERATING_MODE_CODES",
+    "ALARM_SELECTION_CODES",
+    "WRITE_PROTECT_CODES",
+    "DEVICE_FAMILY_CODES",
+    "HART_TICKS_PER_SECOND",
     "get_vendor_name",
     "get_unit_name",
+    "get_classification_name",
+    "get_transfer_function_name",
+    "get_operating_mode_name",
+    "get_alarm_selection_name",
+    "get_write_protect_name",
+    "get_device_family_name",
+    # Bitfield decoders
+    "decode_device_status",
+    "decode_cmd0_flags",
+    "decode_extended_device_status",
+    "decode_device_variable_status",
+    "decode_standardized_status_0",
+    "decode_standardized_status_1",
+    "decode_standardized_status_2",
+    "decode_standardized_status_3",
+    # Timestamp helpers
+    "hart_ticks_to_seconds",
+    "hart_ticks_to_timedelta",
     # Exceptions
     "HARTError",
     "HARTIPError",

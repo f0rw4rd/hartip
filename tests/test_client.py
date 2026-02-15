@@ -992,7 +992,7 @@ class TestTLSErrorWrapping:
                 mock_ctx.check_hostname = False
                 mock_ctx.wrap_socket.side_effect = ssl.SSLError("handshake failed")
 
-                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True)
+                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True, starttls=False)
                 with pytest.raises(HARTIPTLSError, match="handshake failed"):
                     client.connect()
 
@@ -1009,7 +1009,7 @@ class TestTLSErrorWrapping:
                 mock_ctx.check_hostname = False
                 mock_ctx.wrap_socket.side_effect = ssl.SSLError("bad cert")
 
-                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True)
+                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True, starttls=False)
                 with pytest.raises(HARTIPConnectionError):
                     client.connect()
 
@@ -1118,7 +1118,9 @@ class TestCertValidator:
                 session_resp = _build_session_init_response()
                 tls_sock.recv.return_value = session_resp
 
-                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True, cert_validator=_accept)
+                client = HARTIPClient(
+                    "127.0.0.1", protocol="tcp", tls=True, starttls=False, cert_validator=_accept
+                )
                 client.connect()
                 assert len(calls) == 1
                 assert calls[0] == {"subject": "test"}
@@ -1141,7 +1143,9 @@ class TestCertValidator:
                 tls_sock.getpeercert.return_value = {"subject": "bad"}
                 mock_ctx.wrap_socket.return_value = tls_sock
 
-                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True, cert_validator=_reject)
+                client = HARTIPClient(
+                    "127.0.0.1", protocol="tcp", tls=True, starttls=False, cert_validator=_reject
+                )
                 with pytest.raises(HARTIPTLSError, match="rejected by cert_validator"):
                     client.connect()
                 tls_sock.close.assert_called()
@@ -1163,7 +1167,9 @@ class TestCertValidator:
                 tls_sock.getpeercert.return_value = {}
                 mock_ctx.wrap_socket.return_value = tls_sock
 
-                client = HARTIPClient("127.0.0.1", protocol="tcp", tls=True, cert_validator=_crash)
+                client = HARTIPClient(
+                    "127.0.0.1", protocol="tcp", tls=True, starttls=False, cert_validator=_crash
+                )
                 with pytest.raises(HARTIPTLSError, match="fingerprint mismatch"):
                     client.connect()
                 tls_sock.close.assert_called()

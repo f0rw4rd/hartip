@@ -12,12 +12,40 @@ Aliases: 6→7, 11→0, 17→12, 18→13, 19→16, 21→0, 22→20
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from .types import (
+        Cmd2Response,
+        Cmd3Response,
+        Cmd8Response,
+        Cmd9Response,
+        Cmd13Response,
+        Cmd15Response,
+        Cmd48Response,
+        Cmd54Response,
+    )
 
 from construct import Float32b, Int16ub, Int32ub
 
 from .ascii import unpack_ascii
 from .constants import COMM_ERROR_MASK, HARTCommErrorFlags
+from .lookups import (
+    decode_cmd0_flags,
+    decode_device_variable_status,
+    decode_extended_device_status,
+    decode_standardized_status_0,
+    decode_standardized_status_1,
+    decode_standardized_status_2,
+    decode_standardized_status_3,
+    get_alarm_selection_name,
+    get_classification_name,
+    get_device_family_name,
+    get_operating_mode_name,
+    get_transfer_function_name,
+    get_write_protect_name,
+    hart_ticks_to_seconds,
+)
 from .units import get_unit_name
 from .vendors import get_vendor_name
 
@@ -47,6 +75,16 @@ class DeviceVariable:
     unit_name: str
     value: float
     status: int
+
+    @property
+    def classification_name(self) -> str:
+        """Human-readable name for the classification code."""
+        return get_classification_name(self.classification)
+
+    @property
+    def status_decoded(self) -> dict:
+        """Decoded device variable status byte sub-fields."""
+        return decode_device_variable_status(self.status)
 
 
 @dataclass
@@ -105,6 +143,16 @@ class DeviceInfo:
     def physical_signaling_name(self) -> str:
         """Human-readable name for the physical signaling code."""
         return get_physical_signaling_name(self.physical_signaling)
+
+    @property
+    def flags_decoded(self) -> dict[str, bool]:
+        """Decoded Command 0 flags byte as individual bit fields."""
+        return decode_cmd0_flags(self.flags)
+
+    @property
+    def extended_device_status_decoded(self) -> dict[str, bool]:
+        """Decoded extended field device status byte as individual bit fields."""
+        return decode_extended_device_status(self.extended_field_device_status)
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +357,7 @@ def parse_cmd1(payload: bytes) -> Optional[Variable]:
     return Variable(value=value, unit_code=unit_code, label="PV")
 
 
-def parse_cmd2(payload: bytes) -> dict:
+def parse_cmd2(payload: bytes) -> Cmd2Response | dict:
     """Parse Command 2 (Read Loop Current and Percent of Range).
 
     Format (8 bytes): current(4 float) + percent(4 float)
@@ -321,7 +369,7 @@ def parse_cmd2(payload: bytes) -> dict:
     return {"current_mA": current, "percent_range": percent}
 
 
-def parse_cmd3(payload: bytes) -> dict:
+def parse_cmd3(payload: bytes) -> Cmd3Response | dict:
     """Parse Command 3 (Read Dynamic Variables).
 
     Format: current(4 float) + up to 4 x [unit_code(1) + value(4 float)]
@@ -349,7 +397,7 @@ def parse_cmd3(payload: bytes) -> dict:
     return {"loop_current": current, "variables": variables}
 
 
-def parse_cmd9(payload: bytes) -> dict:
+def parse_cmd9(payload: bytes) -> Cmd9Response | dict:
     """Parse Command 9 (Read Device Variables with Status) response.
 
     Format (Wireshark dissector, packet-hartip.c:664-733)::
@@ -401,13 +449,23 @@ def parse_cmd9(payload: bytes) -> dict:
 
     # Optional 4-byte timestamp after all slots
     timestamp = None
+    timestamp_seconds = None
     if offset + 4 <= len(payload):
         timestamp = payload[offset : offset + 4]
+        ticks = (
+            (payload[offset] << 24)
+            | (payload[offset + 1] << 16)
+            | (payload[offset + 2] << 8)
+            | payload[offset + 3]
+        )
+        timestamp_seconds = hart_ticks_to_seconds(ticks)
 
     return {
         "extended_device_status": extended_device_status,
+        "extended_device_status_decoded": decode_extended_device_status(extended_device_status),
         "variables": variables,
         "timestamp": timestamp,
+        "timestamp_seconds": timestamp_seconds,
     }
 
 
@@ -423,7 +481,7 @@ def parse_cmd12(payload: bytes) -> str:
     return unpack_ascii(payload[:24])
 
 
-def parse_cmd13(payload: bytes) -> dict:
+def parse_cmd13(payload: bytes) -> Cmd13Response | dict:
     """Parse Command 13 (Read Tag, Descriptor, Date).
 
     Format: tag(6 packed) + descriptor(12 packed) + day(1) + month(1) + year(1)
@@ -472,7 +530,7 @@ def parse_cmd14(payload: bytes) -> dict:
     }
 
 
-def parse_cmd15(payload: bytes) -> dict:
+def parse_cmd15(payload: bytes) -> Cmd15Response | dict:
     """Parse Command 15 (Read Output Information) response.
 
     Format (18 bytes, from Wireshark dissector packet-hartip.c:774-783)::
@@ -502,13 +560,16 @@ def parse_cmd15(payload: bytes) -> dict:
 
     return {
         "alarm_selection_code": alarm_selection,
+        "alarm_selection_name": get_alarm_selection_name(alarm_selection),
         "transfer_function_code": transfer_function,
+        "transfer_function_name": get_transfer_function_name(transfer_function),
         "range_units_code": range_units,
         "range_unit_name": get_unit_name(range_units),
         "upper_range_value": upper_range,
         "lower_range_value": lower_range,
         "damping_value": damping,
         "write_protect_code": write_protect,
+        "write_protect_name": get_write_protect_name(write_protect),
         "analog_channel_flags": analog_channel_flags,
     }
 
@@ -523,7 +584,7 @@ def parse_cmd20(payload: bytes) -> str:
     return payload[:32].decode("ascii", errors="replace").rstrip("\x00 ")
 
 
-def parse_cmd48(payload: bytes) -> dict:
+def parse_cmd48(payload: bytes) -> Cmd48Response | dict:
     """Parse Command 48 (Read Additional Device Status) response.
 
     Format (Wireshark dissector packet-hartip.c:848-879)::
@@ -551,14 +612,20 @@ def parse_cmd48(payload: bytes) -> dict:
 
     if len(payload) >= 9:
         result["extended_device_status"] = payload[6]
+        result["extended_device_status_decoded"] = decode_extended_device_status(payload[6])
         result["operating_mode"] = payload[7]
+        result["operating_mode_name"] = get_operating_mode_name(payload[7])
         result["standardized_status_0"] = payload[8]
+        result["standardized_status_0_decoded"] = decode_standardized_status_0(payload[8])
 
     if len(payload) >= 13:
         result["standardized_status_1"] = payload[9]
+        result["standardized_status_1_decoded"] = decode_standardized_status_1(payload[9])
         result["analog_channel_saturated"] = payload[10]
         result["standardized_status_2"] = payload[11]
+        result["standardized_status_2_decoded"] = decode_standardized_status_2(payload[11])
         result["standardized_status_3"] = payload[12]
+        result["standardized_status_3_decoded"] = decode_standardized_status_3(payload[12])
 
     if len(payload) >= 14:
         result["analog_channel_fixed"] = payload[13]
@@ -596,7 +663,7 @@ def parse_cmd7(payload: bytes) -> dict:
 parse_cmd6 = parse_cmd7
 
 
-def parse_cmd8(payload: bytes) -> dict:
+def parse_cmd8(payload: bytes) -> Cmd8Response | dict:
     """Parse Command 8 (Read Dynamic Variable Classifications) response.
 
     Format (4 bytes, Wireshark dissect_cmd8, hipflowapp cmd_08.h)::
@@ -612,9 +679,13 @@ def parse_cmd8(payload: bytes) -> dict:
         return {}
     return {
         "pv_classification": payload[0],
+        "pv_classification_name": get_classification_name(payload[0]),
         "sv_classification": payload[1],
+        "sv_classification_name": get_classification_name(payload[1]),
         "tv_classification": payload[2],
+        "tv_classification_name": get_classification_name(payload[2]),
         "qv_classification": payload[3],
+        "qv_classification_name": get_classification_name(payload[3]),
     }
 
 
@@ -769,7 +840,7 @@ def parse_cmd53(payload: bytes) -> dict:
     }
 
 
-def parse_cmd54(payload: bytes) -> dict:
+def parse_cmd54(payload: bytes) -> Cmd54Response | dict:
     """Parse Command 54 (Read Device Variable Information) response.
 
     Format (28 bytes, hipflowapp cmd_54.h insert_Data)::
@@ -804,10 +875,14 @@ def parse_cmd54(payload: bytes) -> dict:
         result["minimum_span"] = Float32b.parse(payload[17:21])
     if len(payload) >= 22:
         result["classification"] = payload[21]
+        result["classification_name"] = get_classification_name(payload[21])
     if len(payload) >= 23:
         result["device_family"] = payload[22]
+        result["device_family_name"] = get_device_family_name(payload[22])
     if len(payload) >= 27:
-        result["acquisition_period"] = Int32ub.parse(payload[23:27])
+        acquisition_ticks = Int32ub.parse(payload[23:27])
+        result["acquisition_period"] = acquisition_ticks
+        result["acquisition_period_seconds"] = hart_ticks_to_seconds(acquisition_ticks)
     if len(payload) >= 28:
         result["properties"] = payload[27]
     return result
@@ -878,6 +953,7 @@ def parse_cmd79(payload: bytes) -> dict:
         "simulation_unit_name": get_unit_name(payload[2]),
         "simulation_value": Float32b.parse(payload[3:7]),
         "device_family": payload[7],
+        "device_family_name": get_device_family_name(payload[7]),
     }
 
 
@@ -898,15 +974,19 @@ def parse_cmd90(payload: bytes) -> dict:
     """
     if len(payload) < 15:
         return {}
+    device_ts = Int32ub.parse(payload[3:7])
+    last_ts = Int32ub.parse(payload[10:14])
     return {
         "device_date_day": payload[0],
         "device_date_month": payload[1],
         "device_date_year": payload[2],
-        "device_timestamp": Int32ub.parse(payload[3:7]),
+        "device_timestamp": device_ts,
+        "device_timestamp_seconds": hart_ticks_to_seconds(device_ts),
         "last_received_date_day": payload[7],
         "last_received_date_month": payload[8],
         "last_received_date_year": payload[9],
-        "last_received_timestamp": Int32ub.parse(payload[10:14]),
+        "last_received_timestamp": last_ts,
+        "last_received_timestamp_seconds": hart_ticks_to_seconds(last_ts),
         "rtc_flags": payload[14],
     }
 
@@ -945,10 +1025,14 @@ def parse_cmd103(payload: bytes) -> dict:
     """
     if len(payload) < 9:
         return {}
+    burst_ticks = Int32ub.parse(payload[1:5])
+    max_burst_ticks = Int32ub.parse(payload[5:9])
     return {
         "burst_message_number": payload[0],
-        "burst_comm_period": Int32ub.parse(payload[1:5]),
-        "max_burst_comm_period": Int32ub.parse(payload[5:9]),
+        "burst_comm_period": burst_ticks,
+        "burst_comm_period_seconds": hart_ticks_to_seconds(burst_ticks),
+        "max_burst_comm_period": max_burst_ticks,
+        "max_burst_comm_period_seconds": hart_ticks_to_seconds(max_burst_ticks),
     }
 
 
@@ -969,6 +1053,7 @@ def parse_cmd104(payload: bytes) -> dict:
         "burst_message_number": payload[0],
         "trigger_mode": payload[1],
         "trigger_classification": payload[2],
+        "trigger_classification_name": get_classification_name(payload[2]),
         "trigger_units_code": payload[3],
         "trigger_unit_name": get_unit_name(payload[3]),
         "trigger_value": Float32b.parse(payload[4:8]),
@@ -1007,13 +1092,18 @@ def parse_cmd105(payload: bytes) -> dict:
     if len(payload) >= 14:
         result["command_number"] = Int16ub.parse(payload[12:14])
     if len(payload) >= 18:
-        result["burst_comm_period"] = Int32ub.parse(payload[14:18])
+        burst_ticks = Int32ub.parse(payload[14:18])
+        result["burst_comm_period"] = burst_ticks
+        result["burst_comm_period_seconds"] = hart_ticks_to_seconds(burst_ticks)
     if len(payload) >= 22:
-        result["max_burst_comm_period"] = Int32ub.parse(payload[18:22])
+        max_burst_ticks = Int32ub.parse(payload[18:22])
+        result["max_burst_comm_period"] = max_burst_ticks
+        result["max_burst_comm_period_seconds"] = hart_ticks_to_seconds(max_burst_ticks)
     if len(payload) >= 23:
         result["trigger_mode"] = payload[22]
     if len(payload) >= 24:
         result["trigger_classification"] = payload[23]
+        result["trigger_classification_name"] = get_classification_name(payload[23])
     if len(payload) >= 25:
         result["trigger_units_code"] = payload[24]
         result["trigger_unit_name"] = get_unit_name(payload[24])
@@ -1116,6 +1206,7 @@ def parse_cmd534(payload: bytes) -> dict:
         "simulation_unit_name": get_unit_name(payload[2]),
         "simulation_value": Float32b.parse(payload[3:7]),
         "device_family": payload[7],
+        "device_family_name": get_device_family_name(payload[7]),
     }
 
 

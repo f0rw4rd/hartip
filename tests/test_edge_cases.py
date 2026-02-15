@@ -1897,7 +1897,10 @@ class TestParseCmd8Edges:
 
     def test_all_unclassified(self):
         result = parse_cmd8(bytes([0, 0, 0, 0]))
-        assert all(v == 0 for v in result.values())
+        assert result["pv_classification"] == 0
+        assert result["sv_classification"] == 0
+        assert result["tv_classification"] == 0
+        assert result["qv_classification"] == 0
 
     def test_extra_bytes_ignored(self):
         result = parse_cmd8(bytes([1, 2, 3, 4, 0xFF]))
