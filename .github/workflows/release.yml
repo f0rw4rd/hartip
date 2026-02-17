@@ -20,7 +20,7 @@
 #      - Repository: hartip
 #      - Workflow: release.yml
 #      - Environment: pypi
-#   3. PYPI_API_TOKEN secret as fallback (optional with OIDC)
+#   3. No API token needed — OIDC trusted publishing only
 #
 # ============================================================================
 
@@ -142,8 +142,7 @@ jobs:
           subject-path: "dist/*"
 
   # ── Publish to PyPI ─────────────────────────────────────────────
-  # Uses OIDC trusted publishing (preferred) — no long-lived secrets needed.
-  # Falls back to API token if OIDC is not configured.
+  # Uses OIDC trusted publishing — no long-lived secrets needed.
   # No pip install here — avoids arbitrary code execution in the publish job.
   publish:
     name: Publish to PyPI
@@ -186,8 +185,6 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
 
   # ── GitHub Release ──────────────────────────────────────────────
   github-release:
