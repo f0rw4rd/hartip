@@ -27,6 +27,7 @@ on:
     branches: [main]  # Only main branch — feature branches tested via PR
   pull_request:
     branches: [main]
+  workflow_call:       # Reusable by release.yml
 
 # Deny all permissions by default — each job grants only what it needs
 permissions: {}
