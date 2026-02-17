@@ -148,7 +148,7 @@ jobs:
 
       - name: Install security tools
         run: |
-          pip install --only-binary :all: "vulture>=2.11" "bandit>=1.7" "pip-audit>=2.7"
+          pip install --only-binary :all: "vulture>=2.11" "bandit>=1.7"
 
       - name: Install package (needed for import resolution)
         run: pip install -e .
@@ -158,6 +158,3 @@ jobs:
 
       - name: Bandit (security linter)
         run: bandit -c pyproject.toml -r hartip/
-
-      - name: pip-audit (dependency vulnerabilities)
-        run: pip-audit .

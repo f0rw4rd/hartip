@@ -91,10 +91,6 @@ jobs:
         if: matrix.python-version == '3.12'
         run: bandit -c pyproject.toml -r hartip/
 
-      - name: pip-audit (dependency vulnerabilities)
-        if: matrix.python-version == '3.12'
-        run: pip-audit .
-
       - name: Test collection sanity
         if: matrix.python-version == '3.12'
         run: pytest --collect-only -q

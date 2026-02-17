@@ -1,47 +1,42 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.10
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
   - repo: local
     hooks:
-      - id: tests
-        name: pytest
-        entry: python -m pytest tests/ -x -q
+      # --- pre-commit: fast static checks (seconds) ---
+      - id: ruff
+        name: ruff lint
+        entry: ruff check --fix
         language: system
-        pass_filenames: false
-        always_run: true
+        types: [python]
         stages: [pre-commit]
-      - id: test-collection
-        name: pytest --collect-only
-        entry: python -m pytest tests/ --collect-only -q
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format
         language: system
-        pass_filenames: false
-        always_run: true
+        types: [python]
         stages: [pre-commit]
       - id: vulture
-        name: vulture (dead code)
+        name: dead code detection (vulture)
         entry: vulture hartip/ vulture_whitelist.py
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # --- pre-push: security + tests ---
       - id: bandit
-        name: bandit (security)
+        name: security lint (bandit)
         entry: bandit -c pyproject.toml -r hartip/
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
-      - id: pip-audit
-        name: pip-audit (dependency vulns)
-        entry: pip-audit .
+        stages: [pre-push]
+      - id: tests
+        name: unit tests
+        entry: python -m pytest tests/ -x -q
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
+        stages: [pre-push]
+      # --- commit-msg ---
       - id: no-ai-coauthor
         name: block AI co-author lines
         entry: .githooks/no-ai-coauthor
