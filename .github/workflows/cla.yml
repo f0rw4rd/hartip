@@ -29,5 +29,5 @@ jobs:
         with:
           path-to-document: "https://github.com/f0rw4rd/hartip/blob/main/CONTRIBUTING.md#contributor-license-agreement"
           path-to-signatures: "signatures/version1/cla.json"
-          branch: "main"
+          branch: "cla-signatures"
           allowlist: f0rw4rd
