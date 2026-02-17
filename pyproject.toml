@@ -7,7 +7,7 @@ name = "hartip-py"
 version = "0.3.0"
 description = "HART-IP protocol library for Python"
 readme = "README.md"
-license = "GPL-3.0-only"
+license = "GPL-3.0-only OR Commercial"
 requires-python = ">=3.10"
 authors = [
     {name = "f0rw4rd"},

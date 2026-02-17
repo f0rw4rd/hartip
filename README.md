@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/hartip-py)](https://pypi.org/project/hartip-py/)
 [![License](https://img.shields.io/github/license/f0rw4rd/hartip)](LICENSE)
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![DCO](https://img.shields.io/badge/DCO-required-blue)](CONTRIBUTING.md)
+[![CLA](https://img.shields.io/badge/CLA-required-blue)](CONTRIBUTING.md)
 
 Pure-Python HART-IP **client** library. Server functionality is not included.
 
@@ -155,4 +155,8 @@ If you find this project useful, consider supporting development:
 
 ## License
 
-GPL-3.0-only
+Dual-licensed under [GPL-3.0](LICENSE) and a [commercial license](LICENSE-COMMERCIAL.md).
+
+Free for open source use under GPL-3.0. If you want to use hartip-py in proprietary
+products without GPL obligations, a commercial license is available —
+see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md) for details.

@@ -2,6 +2,12 @@
 
 Contributions are welcome! By contributing, you agree to the terms below.
 
+## Dual licensing
+
+This project is dual-licensed under [GPL-3.0](LICENSE) and a
+[commercial license](LICENSE-COMMERCIAL.md). Contributions are accepted under
+both licenses — see the [CLA](#contributor-license-agreement) below.
+
 ## Submitting changes
 
 1. Fork the repo
