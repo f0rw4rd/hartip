@@ -20,6 +20,13 @@ both licenses — see the [CLA](#contributor-license-agreement) below.
 
 This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting. Run `ruff check` and `ruff format` before submitting.
 
+## AI-assisted contributions
+
+AI-assisted contributions (e.g. code written with Copilot, Claude, ChatGPT) are
+welcome. However, AI co-author lines (`Co-Authored-By`) are not permitted in
+commit messages — a pre-commit hook enforces this. You are the author of your
+contribution; the tooling you used does not need attribution in the git history.
+
 ---
 
 ## Contributor License Agreement
