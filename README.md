@@ -9,7 +9,7 @@
 
 Pure-Python HART-IP **client** library. Server functionality is not included.
 
-Supports HART-IP v1 (plaintext, TCP/UDP) and v2 (TLS, Direct PDU, Audit Log).
+Supports HART-IP v1 (plaintext, TCP/UDP) and v2 (TLS, Direct PDU, Audit Log). DTLS is not supported — Python's `ssl` module does not provide DTLS.
 
 ## Install
 
