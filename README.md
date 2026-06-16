@@ -160,3 +160,7 @@ Dual-licensed under [GPL-3.0](LICENSE) and a [commercial license](LICENSE-COMMER
 Free for open source use under GPL-3.0. If you want to use hartip-py in proprietary
 products without GPL obligations, a commercial license is available —
 see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md) for details.
+
+## Trademarks
+
+All marks belong to their owners; used nominatively to describe interoperability; no endorsement implied.
