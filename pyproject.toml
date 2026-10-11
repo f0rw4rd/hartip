@@ -60,6 +60,9 @@ Issues = "https://github.com/f0rw4rd/hartip/issues"
 where = ["."]
 include = ["hartip*"]
 
+[tool.setuptools.package-data]
+hartip = ["py.typed"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

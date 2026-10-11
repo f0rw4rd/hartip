@@ -56,9 +56,8 @@ or gateway must be tested against an isolated, non-safety-critical device.
 `ref/` (specs, dissectors, reference implementations, pcaps, `SOURCES.md`) and
 `tasks/` are gitignored local material, not part of the repository.
 
-Package data: `hartip/py.typed` ships in the wheel. `pyproject.toml` has no
-explicit package-data table; it relies on setuptools' default
-`include-package-data` (no `MANIFEST.in`). Keep `py.typed` in the built wheel.
+Package data: `hartip/py.typed` ships through
+`[tool.setuptools.package-data]` in `pyproject.toml`. Keep it listed there.
 
 ## Protocol stack and design constraints
 
