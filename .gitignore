@@ -13,7 +13,6 @@ ref/
 tasks/
 
 # AI agents
-CLAUDE.md
 .claude/
 .cursorrules
 .cursorignore
