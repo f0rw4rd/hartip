@@ -49,6 +49,8 @@ dev = [
     "vulture>=2.14",
     "bandit>=1.9.3",
     "pre-commit>=4.0.0",
+    "mypy>=1.18",
+    "pyright>=1.1.400",
 ]
 
 [project.urls]
@@ -104,6 +106,19 @@ skips = ["B101", "B104", "B311"]
 paths = ["hartip"]
 min_confidence = 80
 exclude = []
+
+[tool.mypy]
+python_version = "3.10"
+files = ["hartip"]
+mypy_path = "typings"
+strict = true
+warn_unreachable = true
+
+[tool.pyright]
+include = ["hartip"]
+pythonVersion = "3.10"
+typeCheckingMode = "strict"
+stubPath = "typings"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
