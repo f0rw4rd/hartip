@@ -24,7 +24,12 @@ from construct import (
     this,
 )
 
-from .constants import HARTIP_HEADER_SIZE, HARTIPMessageID, HARTIPMessageType
+from .constants import (
+    DEFAULT_INACTIVITY_TIMER,
+    HARTIP_HEADER_SIZE,
+    HARTIPMessageID,
+    HARTIPMessageType,
+)
 from .exceptions import HARTFrameError
 
 # ---------------------------------------------------------------------------
@@ -251,7 +256,7 @@ def build_session_init(
     sequence: int,
     *,
     master_type: int = 1,
-    inactivity_timer: int = 30000,
+    inactivity_timer: int = DEFAULT_INACTIVITY_TIMER,
     version: int = 1,
 ) -> bytes:
     """Build a HART-IP Session Initiate request.

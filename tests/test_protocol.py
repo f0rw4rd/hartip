@@ -3,6 +3,7 @@
 import pytest
 
 from hartip.constants import (
+    DEFAULT_INACTIVITY_TIMER,
     HARTIP_HEADER_SIZE,
     HARTFrameType,
     HARTIPMessageID,
@@ -306,6 +307,11 @@ class TestBuildSessionInit:
         payload = frame[HARTIP_HEADER_SIZE:]
         timer = struct.unpack(">I", payload[1:5])[0]
         assert timer == 60000
+
+    def test_default_timer_matches_client_default(self) -> None:
+        """The builder and HARTIPClient agree on the default inactivity timer."""
+        frame = build_session_init(sequence=1)
+        assert frame[HARTIP_HEADER_SIZE + 1 :] == DEFAULT_INACTIVITY_TIMER.to_bytes(4, "big")
 
 
 class TestBuildSessionClose:
