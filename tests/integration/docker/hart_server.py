@@ -78,7 +78,7 @@ class HARTResponseCode(IntEnum):
     TOO_FEW_DATA_BYTES = 5
     TRANSMITTER_SPECIFIC = 6
     IN_WRITE_PROTECT_MODE = 7
-    CMD_NOT_IMPLEMENTED = 32
+    CMD_NOT_IMPLEMENTED = 64  # HART RC 64; 32 is Busy (a delayed-response code)
 
 
 class HARTFrameType(IntEnum):
@@ -373,15 +373,22 @@ def parse_pdu(data: bytes) -> Tuple[int, int, int, bytes]:
     data_start = 3 + addr_len
     cmd_data = data[data_start : data_start + byte_count]
 
-    return delimiter, address if addr_len == 1 else address[0], command, cmd_data
+    # Short frames carry the poll address (int); long frames the 5-byte
+    # unique address (bytes).
+    return delimiter, address, command, cmd_data
 
 
 def build_response_pdu(
-    delimiter: int, address: int, command: int, response_code: int, device_status: int, data: bytes
+    delimiter: int,
+    address: int | bytes,
+    command: int,
+    response_code: int,
+    device_status: int,
+    data: bytes,
 ) -> bytes:
     """Build HART response PDU"""
-    if delimiter & 0x80:  # Long frame
-        addr_bytes = bytes([address]) + bytes(4)  # Simplified
+    if isinstance(address, bytes):  # Long frame: echo the unique address
+        addr_bytes = address
     else:
         addr_bytes = bytes([address & 0x0F])
 
@@ -405,11 +412,19 @@ class HARTCommandHandler:
     def __init__(self, devices: Dict[int, HARTDevice]):
         self.devices = devices
 
-    def get_device(self, address: int) -> Optional[HARTDevice]:
-        """Get device by poll address"""
+    def get_device(self, address: int | bytes) -> Optional[HARTDevice]:
+        """Get device by poll address (short frame) or unique address (long frame)"""
+        if isinstance(address, bytes):
+            # Unique address: byte 1 is the device type, bytes 2-4 the device id.
+            for device in self.devices.values():
+                if address[1] == device.device_type & 0xFF and address[2:5] == device.unique_id:
+                    return device
+            return None
         return self.devices.get(address & 0x0F)
 
-    def handle_command(self, address: int, command: int, data: bytes) -> Tuple[int, int, bytes]:
+    def handle_command(
+        self, address: int | bytes, command: int, data: bytes
+    ) -> Tuple[int, int, bytes]:
         """
         Handle HART command, return (response_code, device_status, response_data)
         """
@@ -426,8 +441,12 @@ class HARTCommandHandler:
             HARTCommand.READ_CURRENT_AND_PERCENT: self._cmd_2_read_current,
             HARTCommand.READ_DYNAMIC_VARS: self._cmd_3_read_dynamic_vars,
             HARTCommand.WRITE_POLL_ADDRESS: self._cmd_6_write_poll_addr,
+            HARTCommand.READ_LOOP_CONFIG: self._cmd_7_read_loop_config,
+            HARTCommand.READ_DYNAMIC_VAR_CLASS: self._cmd_8_read_var_class,
             HARTCommand.READ_TAG_DESCRIPTOR_DATE: self._cmd_13_read_tag,
+            HARTCommand.READ_PRIMARY_VAR_INFO: self._cmd_14_read_pv_info,
             HARTCommand.READ_OUTPUT_INFO: self._cmd_15_read_output,
+            HARTCommand.READ_FINAL_ASSEMBLY: self._cmd_16_read_final_assembly,
             HARTCommand.WRITE_MESSAGE: self._cmd_17_write_message,
             HARTCommand.WRITE_TAG_DESCRIPTOR_DATE: self._cmd_18_write_tag,
             HARTCommand.RESET_CONFIG_FLAG: self._cmd_38_reset_config,
@@ -537,6 +556,15 @@ class HARTCommandHandler:
 
         return HARTResponseCode.SUCCESS, 0, bytes([new_addr])
 
+    def _cmd_7_read_loop_config(self, device: HARTDevice, data: bytes) -> Tuple[int, int, bytes]:
+        """Command 7: Read Loop Configuration (poll address, loop current mode)"""
+        return HARTResponseCode.SUCCESS, 0, bytes([device.poll_address, 1])
+
+    def _cmd_8_read_var_class(self, device: HARTDevice, data: bytes) -> Tuple[int, int, bytes]:
+        """Command 8: Read Dynamic Variable Classifications (HCF_SPEC-183)"""
+        # PV pressure (65), SV temperature (64), TV/QV not classified (0)
+        return HARTResponseCode.SUCCESS, 0, bytes([65, 64, 0, 0])
+
     def _cmd_13_read_tag(self, device: HARTDevice, data: bytes) -> Tuple[int, int, bytes]:
         """Command 13: Read Tag, Descriptor, Date"""
         tag_packed = pack_ascii(device.tag, 8)[:6]
@@ -545,6 +573,19 @@ class HARTCommandHandler:
 
         response = tag_packed + desc_packed + date_bytes
         return HARTResponseCode.SUCCESS, 0, response
+
+    def _cmd_14_read_pv_info(self, device: HARTDevice, data: bytes) -> Tuple[int, int, bytes]:
+        """Command 14: Read PV Transducer Information (16 bytes)"""
+        response = device.unique_id  # transducer serial number (Unsigned-24)
+        response += bytes([device.pv_units])
+        response += struct.pack(">fff", device.upper_range, device.lower_range, 1.0)
+        return HARTResponseCode.SUCCESS, 0, response
+
+    def _cmd_16_read_final_assembly(
+        self, device: HARTDevice, data: bytes
+    ) -> Tuple[int, int, bytes]:
+        """Command 16: Read Final Assembly Number (Unsigned-24)"""
+        return HARTResponseCode.SUCCESS, 0, device.final_assembly.to_bytes(3, "big")
 
     def _cmd_15_read_output(self, device: HARTDevice, data: bytes) -> Tuple[int, int, bytes]:
         """Command 15: Read Output Information (18 bytes per HART spec)"""
