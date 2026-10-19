@@ -73,7 +73,7 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "C4", "UP", "S", "SIM", "TC", "RUF"]
+select = ["E", "F", "W", "I", "B", "C4", "C90", "UP", "S", "SIM", "TC", "RUF"]
 ignore = [
     "E501",    # line length handled by formatter
     "UP006",   # keep typing.Optional etc for py310
@@ -86,6 +86,10 @@ ignore = [
     "RUF022",  # __all__ intentionally grouped by category
     "TC003",   # keep runtime imports simple for this library
 ]
+
+[tool.ruff.lint.mccabe]
+# radon grade B and better; keeps every function small enough to test.
+max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
