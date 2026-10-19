@@ -11,13 +11,33 @@ Pure-Python HART-IP **client** library. Server functionality is not included.
 
 Supports HART-IP v1 (plaintext, TCP/UDP) and v2 (TLS, Direct PDU, Audit Log). DTLS is not supported — Python's `ssl` module does not provide DTLS.
 
-## Install
+## Features
+
+- **HART-IP v1**: UDP (default) and TCP on port 5094, with session initiate/close, keep-alive and sequence numbers
+- **HART-IP v2 TLS**: STARTTLS upgrade (HCF_SPEC-085) or TLS-first, TLS-PSK, CA-verified and mutual TLS, certificate validation callbacks, custom `SSLContext`; TLS 1.2 minimum
+- **v2 messages**: Direct PDU (several commands per request) and Read Audit Log
+- **Command parsers**: 42 commands in the registry (`parse_command`), including extended commands above 253 via Command 31
+- **Robust parsing**: byte count and checksum validation, delayed-response retries, communication-error decoding
+- **Lookup tables**: 178 engineering unit codes, 551 manufacturer IDs, status and classification decoders
+- **High-level API**: `Device` caches identity (Commands 0/13/20) and reads process values on access
+- **Multidrop**: address each device on a loop by poll address or unique address
+- **Declarative parsing**: wire structs via the [construct](https://construct.readthedocs.io/) library
+- **Typed**: ships `py.typed`
+
+## Requirements
+
+- Python 3.10+
+- Python 3.13+ for TLS-PSK (`ssl` PSK callbacks)
+- `construct>=2.10`
+- No root privileges: HART-IP is plain UDP/TCP
+
+## Installation
 
 ```bash
 pip install hartip-py
 ```
 
-Only dependency: [construct](https://construct.readthedocs.io/) for binary parsing.
+Runnable scripts live in [`examples/`](examples/README.md).
 
 ## Quick start
 
@@ -160,6 +180,14 @@ Dual-licensed under [GPL-3.0](LICENSE) and a [commercial license](LICENSE-COMMER
 Free for open source use under GPL-3.0. If you want to use hartip-py in proprietary
 products without GPL obligations, a commercial license is available —
 see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md) for details.
+
+## References
+
+- [HART specifications (FieldComm Group)](https://www.fieldcommgroup.org/hart-specifications)
+- [FieldComm hipserver](https://github.com/FieldCommGroup/hipserver) (reference HART-IP server, used by the integration tests)
+- [Wireshark HART-IP dissector](https://github.com/wireshark/wireshark/blob/master/epan/dissectors/packet-hartip.c)
+- [CISA ICSNPP HART-IP parser](https://github.com/cisagov/icsnpp-hart-ip)
+- [construct library](https://construct.readthedocs.io/)
 
 ## Trademarks
 
