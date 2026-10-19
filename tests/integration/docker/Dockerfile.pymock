@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+LABEL maintainer="f0rw4rd"
+LABEL description="HART-IP Mock Server for testing"
+
+# Pure-Python HART-IP v1 mock (no TLS). HART_MODE=basic|multidrop,
+# HART_UDP_PORT (5094), HART_TCP_PORT (5095).
+
+WORKDIR /app
+
+# No external dependencies needed - pure Python implementation
+# using only stdlib (asyncio, struct, socket)
+
+COPY hart_server.py /app/
+
+# Expose HART-IP ports
+EXPOSE 5094/udp
+EXPOSE 5095/tcp
+
+# Run the server
+CMD ["python3", "-u", "hart_server.py"]

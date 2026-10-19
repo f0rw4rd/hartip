@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 #
-# Run HART-IP integration tests against FieldComm hipserver in Docker.
+# Run HART-IP integration tests in Docker: FieldComm hipserver (v1),
+# hipserver with TLS-PSK (v2) and the pure-Python mock.
 #
 # Usage:
 #   ./tests/integration/run.sh          # build, start, test, stop
-#   ./tests/integration/run.sh --keep   # keep container after tests
+#   ./tests/integration/run.sh --keep   # keep containers after tests
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
-CONTAINER_NAME="hartip-test-device"
+CONTAINERS=(hartip-test-device hartip-test-device-tls hartip-test-pymock)
 
 KEEP=false
 [[ "${1:-}" == "--keep" ]] && { KEEP=true; shift; }
@@ -19,10 +20,10 @@ KEEP=false
 
 cleanup() {
     if [ "$KEEP" = false ]; then
-        echo ">>> Stopping container..."
+        echo ">>> Stopping containers..."
         docker compose -f "$COMPOSE_FILE" down --timeout 5 2>/dev/null || true
     else
-        echo ">>> Container kept running (use: docker compose -f $COMPOSE_FILE down)"
+        echo ">>> Containers kept running (use: docker compose -f $COMPOSE_FILE down)"
     fi
 }
 trap cleanup EXIT
@@ -50,28 +51,32 @@ docker compose version >/dev/null 2>&1 || { echo "ERROR: docker compose not foun
 
 # ── build ──────────────────────────────────────────────────────────────
 
-echo ">>> Building hipserver container..."
+echo ">>> Building containers..."
 docker compose -f "$COMPOSE_FILE" build
 
 # ── start ──────────────────────────────────────────────────────────────
 
-echo ">>> Starting hipserver..."
+echo ">>> Starting containers..."
 docker compose -f "$COMPOSE_FILE" up -d
 
 echo ">>> Waiting for HART-IP services..."
-wait_for_port 127.0.0.1 5094 45   # UDP/TCP (hipserver uses 5094 for both)
+wait_for_port 127.0.0.1 5094 45    # hipserver, UDP and TCP on one port
+wait_for_port 127.0.0.1 5095 45    # hipserver -psk
+wait_for_port 127.0.0.1 25094 45   # pure-Python mock
 
 # Extra settle time for hipserver init
 sleep 2
 
-# Verify container is running
-if ! docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null | grep -q true; then
-    echo "ERROR: Container $CONTAINER_NAME is not running"
-    docker logs "$CONTAINER_NAME" 2>&1 | tail -20
-    exit 1
-fi
+# Verify containers are running
+for name in "${CONTAINERS[@]}"; do
+    if ! docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
+        echo "ERROR: Container $name is not running"
+        docker logs "$name" 2>&1 | tail -20
+        exit 1
+    fi
+done
 
-echo ">>> Container ready"
+echo ">>> Containers ready"
 
 # ── test ───────────────────────────────────────────────────────────────
 

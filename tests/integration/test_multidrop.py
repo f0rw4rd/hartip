@@ -4,7 +4,7 @@ Integration tests for HART-IP multi-drop scan against the Python mock server.
 Starts the mock server in multidrop mode (HART_MODE=multidrop) with devices
 at addresses 0-3, each with a different manufacturer, device type, and tag.
 
-Requires the Python mock server from msf-ics.
+Runs ``docker/hart_server.py`` as a subprocess; no container needed.
 """
 
 from __future__ import annotations
@@ -31,28 +31,7 @@ MOCK_HOST = os.environ.get("HARTIP_TEST_HOST", "127.0.0.1")
 MD_UDP_PORT = 26094
 MD_TCP_PORT = 26095
 
-MOCK_SERVER_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "..",
-    "..",
-    "msf-ics",
-    "docker",
-    "mocks",
-    "services",
-    "hart_server.py",
-)
-# Resolve relative path
-MOCK_SERVER_PATH = os.path.normpath(MOCK_SERVER_PATH)
-
-# Fallback: check known absolute path
-if not os.path.exists(MOCK_SERVER_PATH):
-    MOCK_SERVER_PATH = "/home/feb/pro/msf-ics/docker/mocks/services/hart_server.py"
-
-_skip_no_mock_server = pytest.mark.skipif(
-    not os.path.exists(MOCK_SERVER_PATH),
-    reason=f"Mock server not found at {MOCK_SERVER_PATH}",
-)
+MOCK_SERVER_PATH = os.path.join(os.path.dirname(__file__), "docker", "hart_server.py")
 
 
 # ---------------------------------------------------------------------------
@@ -66,16 +45,12 @@ def multidrop_server():
 
     Session-scoped: starts once for all tests in this module, killed on teardown.
     """
-    if not os.path.exists(MOCK_SERVER_PATH):
-        pytest.skip(f"Mock server not found at {MOCK_SERVER_PATH}")
-
     env = os.environ.copy()
     env.update(
         {
             "HART_MODE": "multidrop",
             "HART_UDP_PORT": str(MD_UDP_PORT),
             "HART_TCP_PORT": str(MD_TCP_PORT),
-            "HART_TLS_PORT": "0",  # disable TLS
         }
     )
 
@@ -149,7 +124,6 @@ EXPECTED_TAGS = {
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_mock_server
 @pytest.mark.integration
 class TestMultidropScan:
     """Multi-drop scan tests with devices at addresses 0-3."""

@@ -1,0 +1,73 @@
+# FieldComm HART-IP Developer Kit with TLS-PSK (HART-IP v2).
+# hipserver + hipflowapp (Apache-2.0) at pinned commits, started with -psk.
+# Session Initiate goes in plaintext on the one port, then the TCP socket
+# is upgraded to TLS (HCF_SPEC-085 STARTTLS).
+
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    g++ \
+    git \
+    libssl-dev \
+    libjsoncpp-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+# Pin to specific commits for reproducibility (no moving HEAD).
+RUN git clone https://github.com/FieldCommGroup/hipflowapp.git && \
+    git -C hipflowapp checkout 1c5b22112b95f4e7e14cb62539c3806f98040c1e
+RUN git clone https://github.com/FieldCommGroup/hipserver.git && \
+    git -C hipserver checkout 8c5b565a93c3bb50a8eec47df62d2b3ea2edd45c
+
+RUN rm -rf /src/hipflowapp/hipflowapp/Hip_Native/hipserver && \
+    cp -r /src/hipserver /src/hipflowapp/hipflowapp/Hip_Native/hipserver
+
+WORKDIR /src/hipflowapp/hipflowapp/Hip_Native/hipserver/hipserver/Server
+RUN make clean 2>/dev/null || true && make
+
+WORKDIR /src/hipflowapp/hipflowapp/Hip_Native
+RUN make clean 2>/dev/null || true && make
+
+# Runtime image
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    libjsoncpp25 \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /src/hipflowapp/hipflowapp/Hip_Native/hipserver/hipserver/Server/hipserver /app/
+COPY --from=builder /src/hipflowapp/hipflowapp/Hip_Native/hipflowapp /app/
+
+# Seed HART-IP v2 config with TLS-PSK credentials
+# PSK identity: HART-IPClient
+# PSK key: 7777772e68617274636f6d6d2e6f7267 (hex for "www.hartcomm.org")
+RUN mkdir -p /var/lib/hipServer && \
+    echo '{"slots":[{"clientIdentifier":"HART-IPClient","clientSecurityOptions":"1","key":"7777772e68617274636f6d6d2e6f7267","password":"!1HARTIPhighway","slot":"0"}],"supTCPPort":"0","supUDPPort":"0","syslogHOSTNAME":"","syslogIPPort":"514","syslogKey":"","syslogPassword":"","version":"2"}' \
+    > /var/lib/hipServer/hipServer.conf
+
+# Create startup script with -psk flag for TLS-PSK mode
+RUN echo '#!/bin/bash\n\
+echo "========================================"\n\
+echo "HART-IP Server v2 (TLS-PSK)"\n\
+echo "  Port:     ${HART_UDP_PORT:-5094} (UDP + TCP, STARTTLS)"\n\
+echo "  PSK ID:   HART-IPClient"\n\
+echo "========================================"\n\
+exec /app/hipserver -p ${HART_UDP_PORT:-5094} -psk /app/hipflowapp\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+EXPOSE 5094/udp
+EXPOSE 5094/tcp
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
+    CMD nc -zu localhost 5094 || exit 1
+
+CMD ["/app/start.sh"]

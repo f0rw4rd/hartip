@@ -1,10 +1,16 @@
 """
 Shared pytest fixtures for HART-IP integration testing.
 
-Prerequisites:
-    - A HART-IP hipserver reachable on UDP 5094 / TCP 5095
-    - Either via ``docker compose -f tests/integration/docker-compose.yml up -d``
-      or any other hipserver instance (e.g. from the msf-ics mock stack)
+Prerequisites (``./tests/integration/run.sh`` starts all of them, or
+``docker compose -f tests/integration/docker-compose.yml up -d``):
+
+- FieldComm hipserver on UDP and TCP 5094 (``hart-device``)
+- hipserver in TLS-PSK mode on 5095 (``hart-device-tls``, ``test_tls.py``)
+- the pure-Python mock on UDP 25094 / TCP 25095 (``hart-pymock``,
+  ``test_mock.py``)
+
+``test_multidrop.py`` starts ``docker/hart_server.py`` itself as a
+subprocess and needs no container.
 
 Override host/ports via environment variables::
 
@@ -75,12 +81,9 @@ def _hipserver_available() -> bool:
 
     Checks (in order):
     1. Container ``hartip-test-device`` running  (own compose stack)
-    2. Container ``hart-hipserver`` running       (msf-ics mock stack)
-    3. TCP port reachable                         (any hipserver)
+    2. TCP port reachable                         (any hipserver)
     """
     if _container_running(CONTAINER_NAME):
-        return True
-    if _container_running("hart-hipserver"):
         return True
     return _port_open(HART_HOST, HART_TCP_PORT)
 
@@ -91,7 +94,7 @@ def _hipserver_available() -> bool:
 
 skip_no_hipserver = pytest.mark.skipif(
     not _hipserver_available(),
-    reason="No HART-IP hipserver reachable (run docker compose up or start msf-ics mocks)",
+    reason="No HART-IP hipserver reachable (run tests/integration/run.sh)",
 )
 
 skip_no_udp = pytest.mark.skipif(

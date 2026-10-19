@@ -47,9 +47,12 @@ or gateway must be tested against an isolated, non-safety-critical device.
 - `hartip/ascii.py`: HART 6-bit packed ASCII
 - `hartip/types.py`: `TypedDict` return shapes for the parsers
 - `hartip/exceptions.py`: the exception hierarchy
-- `tests/`: unit tests (`test_*.py`) and `tests/integration/` (hipserver in
-  Docker via `docker-compose.yml` / `run.sh`, plus tests against the msf-ics
-  Python mock server)
+- `tests/`: unit tests (`test_*.py`) and `tests/integration/`: Docker
+  services in `docker-compose.yml` / `run.sh` (FieldComm hipserver v1 on
+  5094, hipserver `-psk` v2 on 5095, the pure-Python mock on 25094/25095).
+  `tests/integration/docker/` holds the Dockerfiles (hipserver and
+  hipflowapp built from source at pinned commits) and the mock's
+  `hart_server.py`
 - `examples/`: numbered runnable scripts (`01_basic_read.py` to
   `07_tls_psk_auth.py`), indexed in `examples/README.md`; keep the index in
   step when adding or renaming one
@@ -180,13 +183,14 @@ repository. Bandit skips B101, B104 and B311; vulture uses
 plain `pytest` needs no network or device. Integration tests:
 
 ```bash
-./tests/integration/run.sh            # builds and starts hipserver, runs, stops
-./tests/integration/run.sh --keep     # leave the container running
+./tests/integration/run.sh            # builds and starts the services, runs, stops
+./tests/integration/run.sh --keep     # leave the containers running
 HARTIP_TEST_HOST=10.0.0.1 HARTIP_TEST_UDP_PORT=5094 pytest -m integration
 ```
 
-They skip when the hipserver or the msf-ics mock server is not reachable; the
-TLS-PSK tests also need Python 3.13+.
+They skip when the service they need is not reachable; the TLS-PSK tests
+also need Python 3.13+. `test_multidrop.py` starts `docker/hart_server.py`
+as a subprocess and needs no container.
 
 Release (`.github/workflows/release.yml`): pushing a tag `vX.Y.Z` reruns CI,
 checks that the tag equals `hartip.__version__` (the single version source;

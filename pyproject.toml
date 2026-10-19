@@ -89,6 +89,8 @@ ignore = [
 "__init__.py" = ["F401"]
 "tests/**" = ["S101", "S106", "S603", "S607", "SIM105", "SIM117", "C408", "B007", "RUF003", "RUF043"]
 "vulture_whitelist.py" = ["B018", "E402", "F401"]
+# Integration mock server, not library code.
+"tests/integration/docker/hart_server.py" = ["I001", "SIM108"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -1,4 +1,5 @@
 services:
+  # FieldComm hipserver + hipflowapp, HART-IP v1, no auth.
   hart-device:
     build:
       context: ./docker
@@ -17,3 +18,40 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  # Same device started with -psk: HART-IP v2, TLS-PSK after a plaintext
+  # Session Initiate. PSK identity HART-IPClient, key
+  # 7777772e68617274636f6d6d2e6f7267 (see Dockerfile.hipserver-tls).
+  hart-device-tls:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.hipserver-tls
+    container_name: hartip-test-device-tls
+    hostname: hart-device-tls
+    ports:
+      - "5095:5094/udp"
+      - "5095:5094/tcp"
+    environment:
+      - TZ=UTC
+      - HART_UDP_PORT=5094
+    healthcheck:
+      test: ["CMD", "nc", "-zu", "localhost", "5094"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Pure-Python mock (hart_server.py): error responses, write protection,
+  # commands hipflowapp lacks. Used by test_mock.py.
+  hart-pymock:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.pymock
+    container_name: hartip-test-pymock
+    hostname: hart-pymock
+    ports:
+      - "25094:5094/udp"
+      - "25095:5095/tcp"
+    environment:
+      - TZ=UTC
+      - HART_MODE=basic

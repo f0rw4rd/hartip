@@ -1,17 +1,15 @@
 """
 Integration tests for HART-IP client against the Python mock server.
 
-The Python mock server (from msf-ics) implements the full HART command set
-including error responses, write protection, and multi-device support.
+The Python mock server (``docker/hart_server.py``) implements the full HART
+command set including error responses, write protection, and multi-device
+support.
 
-Requires the mock server on HARTIP_TEST_MOCK_UDP_PORT (default 15094) and
-HARTIP_TEST_MOCK_TCP_PORT (default 15095).  Start it with::
+Requires the mock server on HARTIP_TEST_MOCK_UDP_PORT (default 25094) and
+HARTIP_TEST_MOCK_TCP_PORT (default 25095).  The ``hart-pymock`` compose
+service provides it, or start it directly::
 
-    HART_UDP_PORT=15094 HART_TCP_PORT=15095 python hart_server.py
-
-Override via environment variables::
-
-    HARTIP_TEST_MOCK_UDP_PORT=15094 HARTIP_TEST_MOCK_TCP_PORT=15095
+    HART_UDP_PORT=25094 HART_TCP_PORT=25095 python tests/integration/docker/hart_server.py
 """
 
 from __future__ import annotations
