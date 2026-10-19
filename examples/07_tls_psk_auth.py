@@ -59,69 +59,74 @@ def parse_args():
     return p.parse_args()
 
 
-def main():
-    args = parse_args()
+def probe(args):
+    try:
+        ver = probe_server_version(args.host, port=args.port)
+        print(f"Server reports HART-IP v{ver}")
+    except (HARTIPConnectionError, HARTIPTimeoutError) as e:
+        print(f"Probe failed: {e}")
 
-    # Optional version probe
-    if args.probe:
-        try:
-            ver = probe_server_version(args.host, port=args.port)
-            print(f"Server reports HART-IP v{ver}")
-        except (HARTIPConnectionError, HARTIPTimeoutError) as e:
-            print(f"Probe failed: {e}")
 
-    # Resolve PSK key
-    if args.key is not None:
-        try:
-            psk_key = bytes.fromhex(args.key)
-        except ValueError:
-            print(f"Error: --key must be a hex string, got {args.key!r}")
-            sys.exit(1)
-    else:
-        psk_key = HIPSERVER_DEFAULT_KEY
+def resolve_key(args):
+    if args.key is None:
+        return HIPSERVER_DEFAULT_KEY
+    try:
+        return bytes.fromhex(args.key)
+    except ValueError:
+        print(f"Error: --key must be a hex string, got {args.key!r}")
+        sys.exit(1)
 
-    # Build Device kwargs
+
+def device_kwargs(args, psk_key):
     kwargs = {"port": args.port, "protocol": "tcp", "timeout": args.timeout}
-
     if args.no_tls:
         print(f"Connecting to {args.host}:{args.port} (TCP, plaintext)...")
         kwargs["version"] = 1
-    else:
-        print(f"Connecting to {args.host}:{args.port} (TLS-PSK)...")
-        print(f"  Identity: {args.identity}")
-        print(f"  Key:      {psk_key.hex()}")
-        kwargs.update(
-            version=2,
-            psk_identity=args.identity,
-            psk_key=psk_key,
-            ciphers=HARTIP_V2_PSK_CIPHERS,
-        )
+        return kwargs
+    print(f"Connecting to {args.host}:{args.port} (TLS-PSK)...")
+    print(f"  Identity: {args.identity}")
+    print(f"  Key:      {len(psk_key)} bytes")  # never print key material
+    kwargs.update(
+        version=2,
+        psk_identity=args.identity,
+        psk_key=psk_key,
+        ciphers=HARTIP_V2_PSK_CIPHERS,
+    )
+    return kwargs
+
+
+def show_device(dev):
+    print(f"Device: {dev.manufacturer_name}")
+    print(f"  Type    : {dev.device_type}")
+    print(f"  ID      : {dev.device_id}")
+    print(f"  HART rev: {dev.hart_revision}")
+    print(f"  Tag     : {dev.tag!r}")
+    print(f"  Long tag: {dev.long_tag!r}")
+
+    pv = dev.primary_variable
+    if pv:
+        print(f"  PV      : {pv.value:.4f} {pv.unit_name}")
+
+    status = dev.status
+    if status and "extended_device_status" in status:
+        print(f"  Status  : 0x{status['extended_device_status']:02x}")
+        decoded = status.get("extended_device_status_decoded", {})
+        active = [k for k, v in decoded.items() if v]
+        if active:
+            print(f"  Flags   : {', '.join(active)}")
+
+
+def main():
+    args = parse_args()
+    if args.probe:
+        probe(args)
+    kwargs = device_kwargs(args, resolve_key(args))
 
     try:
         with Device(args.host, **kwargs) as dev:
             print("  Connected!\n")
-
-            print(f"Device: {dev.manufacturer_name}")
-            print(f"  Type    : {dev.device_type}")
-            print(f"  ID      : {dev.device_id}")
-            print(f"  HART rev: {dev.hart_revision}")
-            print(f"  Tag     : {dev.tag!r}")
-            print(f"  Long tag: {dev.long_tag!r}")
-
-            pv = dev.primary_variable
-            if pv:
-                print(f"  PV      : {pv.value:.4f} {pv.unit_name}")
-
-            status = dev.status
-            if status and "extended_device_status" in status:
-                print(f"  Status  : 0x{status['extended_device_status']:02x}")
-                decoded = status.get("extended_device_status_decoded", {})
-                active = [k for k, v in decoded.items() if v]
-                if active:
-                    print(f"  Flags   : {', '.join(active)}")
-
+            show_device(dev)
             print("\nDone.")
-
     except HARTIPTLSError as e:
         print(f"\nTLS error: {e}")
         print("  Check PSK identity/key match the device configuration.")
