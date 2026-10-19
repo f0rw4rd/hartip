@@ -1514,7 +1514,8 @@ class HARTIPClient:
         Raises:
             HARTIPConnectionError: Not connected or no active session.
             HARTIPTimeoutError: No response within timeout.
-            HARTIPStatusError: HART-IP header status != 0.
+            HARTIPStatusError: HART-IP header status other than 0 or 8
+                (SET_TO_NEAREST_VALUE, the server clamped the range).
         """
         from .v2 import build_audit_log_request, parse_audit_log_response
 
@@ -1534,7 +1535,12 @@ class HARTIPClient:
 
         header = HARTIPHeader.parse(raw[:HARTIP_HEADER_SIZE])
 
-        if header.status != HARTIPStatus.SUCCESS:
+        # hipserver (hsauditlog.cpp) answers a range past its records with
+        # SET_TO_NEAREST_VALUE and the clamped records; start_record and
+        # number_of_records in the body say what was actually returned.
+        if header.status == HARTIPStatus.WARNING_SET_TO_NEAREST_VALUE:
+            logger.debug("Audit log range adjusted by server")
+        elif header.status != HARTIPStatus.SUCCESS:
             try:
                 name = HARTIPStatus(header.status).name
             except ValueError:

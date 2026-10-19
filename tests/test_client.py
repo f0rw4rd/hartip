@@ -1525,3 +1525,39 @@ class TestExtendedCommandResponse:
         client._socket.recvfrom.side_effect = [(publish, _ADDR), (_cmd_reply(1, seq=1), _ADDR)]
         client.send_command(1)
         assert [(r.command_number, r.payload) for r in seen] == [(534, b"\xaa")]
+
+
+def _audit_log_body(records: int) -> bytes:
+    """Read Audit Log response body: start, count, times, status, size, records."""
+    return (
+        bytes([0, records])
+        + b"\x00" * 16
+        + b"\x00\x00"
+        + (58).to_bytes(2, "big")
+        + b"\x00" * (58 * records)
+    )
+
+
+class TestAuditLogStatus:
+    def test_set_to_nearest_warning_returns_records(self) -> None:
+        """hipserver answers an over-long request with status 8 and the clamped records.
+
+        hipserver hsauditlog.cpp (8c5b565) sets WARNING_CODE 8 when
+        start_record or number_of_records exceeds what it holds, then sends
+        the records it does have.
+        """
+        reply = _raw_msg(1, 5, 1, _audit_log_body(1), status=8)
+        client = _session_client()
+        client.version = 2
+        client._socket.recvfrom.side_effect = [(reply, _ADDR)]
+        log = client.read_audit_log(0, 5)
+        assert log.number_of_records == 1
+        assert len(log.records) == 1
+
+    def test_error_status_still_raises(self) -> None:
+        reply = _raw_msg(1, 5, 1, b"", status=HARTIPStatus.ERROR_DEVICE_SPECIFIC)
+        client = _session_client()
+        client.version = 2
+        client._socket.recvfrom.side_effect = [(reply, _ADDR)]
+        with pytest.raises(HARTIPStatusError):
+            client.read_audit_log(0, 5)
