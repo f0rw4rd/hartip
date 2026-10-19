@@ -15,6 +15,7 @@ from hartip.protocol import (
     HARTIPHeader,
     HARTPdu,
     build_request,
+    build_session_close,
     build_session_init,
     xor_checksum,
 )
@@ -43,6 +44,20 @@ class TestRawFrameParsing:
         assert header.status == HARTIPStatus.SUCCESS, f"Session init failed: status={header.status}"
         return sock
 
+    def _end_session(self, sock: socket.socket) -> None:
+        """Send Session Close and close the socket.
+
+        hipserver has few session slots and holds an abandoned one for the
+        whole inactivity timer, so leaving it open starves later tests.
+        """
+        try:
+            sock.sendto(build_session_close(sequence=0xFFFF), (HART_HOST, HART_UDP_PORT))
+            sock.recvfrom(1024)
+        except OSError:
+            pass
+        finally:
+            sock.close()
+
     def _send_cmd(self, sock: socket.socket, sequence: int, command: int = 0) -> bytes:
         """Send a HART command and return the raw response."""
         frame = build_request(
@@ -69,7 +84,7 @@ class TestRawFrameParsing:
             assert header.byte_count == len(raw)
             assert header.payload_len == len(raw) - HARTIP_HEADER_SIZE
         finally:
-            sock.close()
+            self._end_session(sock)
 
     def test_pdu_parses_correctly(self):
         """Parse the PDU portion of a live response."""
@@ -88,7 +103,7 @@ class TestRawFrameParsing:
             )
             assert pdu.byte_count == len(pdu.data)
         finally:
-            sock.close()
+            self._end_session(sock)
 
     def test_checksum_valid(self):
         """Verify the response PDU checksum is correct."""
@@ -99,7 +114,7 @@ class TestRawFrameParsing:
             expected = xor_checksum(pdu_bytes[:-1])
             assert expected == pdu_bytes[-1]
         finally:
-            sock.close()
+            self._end_session(sock)
 
     def test_byte_count_is_total_length(self):
         """Verify that header byte_count == total message length."""
@@ -109,4 +124,4 @@ class TestRawFrameParsing:
             header = HARTIPHeader.parse(raw[:HARTIP_HEADER_SIZE])
             assert header.byte_count == len(raw)
         finally:
-            sock.close()
+            self._end_session(sock)
