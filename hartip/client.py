@@ -23,7 +23,7 @@ import threading
 import time
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Final
+from typing import Final, TypedDict
 
 from ._commands import UNSET, CommandsMixin
 from ._tls import CertValidator, TLSSettings
@@ -78,7 +78,7 @@ from .v2 import (
     parse_direct_pdu_response,
 )
 
-__all__ = ["HARTIPClient", "HARTIPResponse", "probe_server_version"]
+__all__ = ["ClientOptions", "HARTIPClient", "HARTIPResponse", "probe_server_version"]
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,35 @@ logger = logging.getLogger(__name__)
 _UNSET: Final = UNSET
 
 PublishCallback = Callable[[HARTIPResponse], None]
+
+
+class ClientOptions(TypedDict, total=False):
+    """Keyword options of :class:`HARTIPClient` after ``host`` and ``port``.
+
+    Types the ``**kwargs`` that :class:`~hartip.high_level.Device` passes
+    through, so a misspelled or mistyped option is a type error.
+    """
+
+    protocol: str
+    timeout: float
+    master_type: int
+    inactivity_timer: int
+    auto_keepalive: bool
+    dr_retries: int
+    dr_retry_delay: int
+    version: int
+    tls: bool | None
+    starttls: bool
+    psk_identity: str | None
+    psk_key: bytes | None
+    ciphers: str | None
+    ca_certs: str | None
+    certfile: str | None
+    keyfile: str | None
+    cert_validator: CertValidator | None
+    ssl_context: ssl.SSLContext | None
+    on_publish: PublishCallback | None
+
 
 # Per the FieldComm C# client, SET_TO_NEAREST_VALUE (the server adjusted
 # the inactivity timer) is a successful Session Initiate.

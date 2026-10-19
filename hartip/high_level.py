@@ -19,7 +19,7 @@ Example::
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from .client import HARTIPClient
 from .device import (
@@ -38,6 +38,9 @@ from .device import (
 )
 
 if TYPE_CHECKING:
+    from typing_extensions import Unpack
+
+    from .client import ClientOptions
     from .response import HARTIPResponse
     from .types import Cmd2Response, Cmd48Response, EmptyResponse
 
@@ -75,7 +78,7 @@ class Device:
         port: int = 5094,
         *,
         auto_read_tags: bool = True,
-        **kwargs: Any,
+        **kwargs: Unpack[ClientOptions],
     ) -> None:
         self._client = HARTIPClient(host, port=port, **kwargs)
         self._info: DeviceInfo = DeviceInfo()

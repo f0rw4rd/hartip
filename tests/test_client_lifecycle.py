@@ -299,3 +299,16 @@ class TestRequests:
             client.close()
         assert [c.command_number for c in result.commands] == [0]
         assert result.commands[0].response_code == 0
+
+
+class TestClientOptions:
+    def test_matches_client_signature(self) -> None:
+        """ClientOptions lists exactly the HARTIPClient options after host and port."""
+        import inspect
+
+        from hartip import ClientOptions
+
+        params = list(inspect.signature(HARTIPClient.__init__).parameters)
+        assert params[:3] == ["self", "host", "port"]
+        assert list(ClientOptions.__annotations__) == params[3:]
+        assert ClientOptions.__required_keys__ == frozenset()

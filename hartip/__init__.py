@@ -32,7 +32,7 @@ Quickstart::
 """
 
 from .ascii import pack_ascii, unpack_ascii
-from .client import HARTIPClient
+from .client import ClientOptions, HARTIPClient
 from .constants import (
     COMM_ERROR_MASK,
     DEFAULT_INACTIVITY_TIMER,
@@ -266,6 +266,7 @@ __version__ = "0.4.0"
 __all__ = [
     # Client
     "HARTIPClient",
+    "ClientOptions",
     "HARTIPResponse",
     "probe_server_version",
     # High-level

@@ -165,7 +165,9 @@ with HARTIPClient(
 ```
 
 `Device(host, port=5094, *, auto_read_tags=True, **kwargs)` passes extra
-keyword arguments through to `HARTIPClient`.
+keyword arguments through to `HARTIPClient`; they are typed as
+`Unpack[ClientOptions]`. Adding a `HARTIPClient.__init__` parameter means
+adding it to `ClientOptions` too (`TestClientOptions` fails otherwise).
 
 ## Development setup and checks
 
