@@ -18,7 +18,6 @@ from hartip import (
     parse_cmd1,
     parse_cmd3,
 )
-from hartip.exceptions import HARTIPTimeoutError
 
 from .conftest import skip_no_hipserver, skip_no_tcp
 
@@ -63,29 +62,25 @@ class TestTCPReadUniqueId:
 
 
 class TestTCPReadVariables:
-    """Process variable reads over TCP."""
+    """Process variable reads over TCP.
+
+    hipflowapp is a HART 7 device: it answers only Command 0 in short-frame
+    form, so read the unique id first and let the client switch to the
+    long address, as a real master does.
+    """
 
     def test_primary_variable(self, tcp_client):
-        try:
-            resp = tcp_client.read_primary_variable()
-        except HARTIPTimeoutError:
-            pytest.skip("hipflowapp does not respond to Command 1 over TCP")
-        if resp.response_code == HARTResponseCode.SUCCESS:
-            var = parse_cmd1(resp.payload)
-            assert var is not None
-        else:
-            pytest.fail(f"Command 1 failed with response code {resp.response_code}")
+        tcp_client.read_unique_id().raise_for_error()
+        resp = tcp_client.read_primary_variable()
+        resp.raise_for_error()
+        assert parse_cmd1(resp.payload) is not None
 
     def test_dynamic_variables(self, tcp_client):
-        try:
-            resp = tcp_client.read_dynamic_variables()
-        except HARTIPTimeoutError:
-            pytest.skip("hipflowapp does not respond to Command 3 over TCP")
-        if resp.response_code == HARTResponseCode.SUCCESS:
-            result = parse_cmd3(resp.payload)
-            assert len(result["variables"]) >= 1
-        else:
-            pytest.fail(f"Command 3 failed with response code {resp.response_code}")
+        tcp_client.read_unique_id().raise_for_error()
+        resp = tcp_client.read_dynamic_variables()
+        resp.raise_for_error()
+        result = parse_cmd3(resp.payload)
+        assert len(result["variables"]) >= 1
 
 
 class TestTCPMultipleCommands:
