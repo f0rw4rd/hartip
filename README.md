@@ -177,6 +177,11 @@ HARTError
 | `send_direct_pdu(commands)` | v2 Direct PDU |
 | `read_audit_log()` | v2 Audit Log |
 
+Commands above 253 go out wrapped in Command 31. The reply is unwrapped for you:
+`command_number` reports the expanded number (e.g. 534), `payload` no longer
+starts with its 2 bytes, `parsed` uses the parser for 534, and `pdu.command`
+stays 31. A reply that carries a different expanded number raises `HARTFrameError`.
+
 ## Testing
 
 ```bash

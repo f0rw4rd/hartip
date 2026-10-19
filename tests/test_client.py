@@ -493,7 +493,7 @@ class TestUseLongFrame:
 class TestExtendedCommand:
     def test_cmd_768_wrapped_in_cmd_31(self) -> None:
         session_resp = _build_session_init_response()
-        cmd_resp = _build_mock_response(command=31, payload=b"\x00" * 4)
+        cmd_resp = _build_mock_response(command=31, payload=(768).to_bytes(2, "big") + b"\x00\x00")
         close_resp = _build_session_close_response()
 
         with patch("hartip.client.socket.socket") as mock_sock_cls:
@@ -1443,3 +1443,85 @@ class TestOnPublish:
         ]
         assert client.send_command(1).command_number == 1
         assert seen == []
+
+
+# ---------------------------------------------------------------------------
+# Client – Command 31 (expanded command) responses
+# ---------------------------------------------------------------------------
+
+# Captured response to expanded command 533 sent via Command 31
+# (hart-ip_publish_and_keepAlive.pcapng, frame 54): long frame 0x86, rc 0,
+# device status 0x10, expanded command 0x0215, then 7 data bytes.
+_PCAP_CMD31_RSP_533 = bytes.fromhex("01010300000c001c86b9fd95266f1f0b00100215000000000000010c")
+_PCAP_UNIQUE_ADDR = bytes.fromhex("b9fd95266f")
+
+
+def _with_seq(msg: bytes, seq: int) -> bytes:
+    return msg[:4] + seq.to_bytes(2, "big") + msg[6:]
+
+
+class TestExtendedCommandResponse:
+    def test_pcap_cmd31_response_unwrapped(self) -> None:
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [(_with_seq(_PCAP_CMD31_RSP_533, 1), _ADDR)]
+        resp = client.send_command(533, unique_addr=_PCAP_UNIQUE_ADDR)
+        assert resp.pdu.command == 31
+        assert resp.command_number == 533
+        assert resp.response_code == 0
+        assert resp.device_status == 0x10
+        assert resp.payload == bytes.fromhex("00000000000001")
+
+    def test_cmd534_parsed_after_unwrap(self) -> None:
+        dv = bytes([0, 0, 250]) + struct.pack(">f", float("nan")) + bytes([5])
+        pdu = build_pdu(0x06, b"\x80", 31, b"\x00\x00" + (534).to_bytes(2, "big") + dv)
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [(_raw_msg(1, 3, 1, pdu), _ADDR)]
+        resp = client.send_command(534)
+        assert resp.command_number == 534
+        assert resp.command_name != "unknown_cmd_31"
+        assert resp.payload == dv
+        assert resp.parsed["simulation_units_code"] == 250
+        assert resp.parsed["device_family"] == 5
+
+    def test_expanded_number_mismatch_raises(self) -> None:
+        pdu = build_pdu(0x06, b"\x80", 31, b"\x00\x00" + (535).to_bytes(2, "big"))
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [(_raw_msg(1, 3, 1, pdu), _ADDR)]
+        with pytest.raises(HARTFrameError, match="535"):
+            client.send_command(534)
+
+    def test_success_without_expanded_number_raises(self) -> None:
+        pdu = build_pdu(0x06, b"\x80", 31, b"\x00\x00")
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [(_raw_msg(1, 3, 1, pdu), _ADDR)]
+        with pytest.raises(HARTFrameError, match="expanded command number"):
+            client.send_command(534)
+
+    def test_error_response_without_data_keeps_requested_number(self) -> None:
+        """rc 64 (command not implemented) may come back without the expanded number."""
+        pdu = build_pdu(0x06, b"\x80", 31, bytes([HARTResponseCode.CMD_NOT_IMPLEMENTED, 0]))
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [(_raw_msg(1, 3, 1, pdu), _ADDR)]
+        resp = client.send_command(534)
+        assert resp.command_number == 534
+        assert resp.response_code == HARTResponseCode.CMD_NOT_IMPLEMENTED
+        with pytest.raises(HARTResponseError):
+            resp.raise_for_error()
+
+    def test_raw_command_31_left_alone(self) -> None:
+        """Sending 31 explicitly returns the reply unmodified."""
+        pdu = build_pdu(0x06, b"\x80", 31, b"\x00\x00\x02\x16\xaa")
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [(_raw_msg(1, 3, 1, pdu), _ADDR)]
+        resp = client.send_command(31, data=b"\x02\x16")
+        assert resp.command_number == 31
+        assert resp.payload == b"\x02\x16\xaa"
+
+    def test_publish_of_expanded_command_unwrapped(self) -> None:
+        seen = []
+        client = _session_client()
+        client._on_publish = seen.append
+        publish = _raw_msg(2, 3, 5, build_pdu(0x01, b"\x80", 31, b"\x00\x00\x02\x16\xaa"))
+        client._socket.recvfrom.side_effect = [(publish, _ADDR), (_cmd_reply(1, seq=1), _ADDR)]
+        client.send_command(1)
+        assert [(r.command_number, r.payload) for r in seen] == [(534, b"\xaa")]

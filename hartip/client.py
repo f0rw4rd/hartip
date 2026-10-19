@@ -97,12 +97,18 @@ class HARTIPResponse:
         comm_error: ``True`` if bit 7 of the response code byte was set,
             indicating a communication error summary rather than a command
             response code.
+        expanded_command: For a command above 253 sent through Command 31,
+            the expanded command number; ``None`` otherwise.  When set,
+            :attr:`command_number` reports it, :attr:`payload` no longer
+            starts with the 2-byte expanded number, and ``pdu.command`` is
+            still 31.
     """
 
     __slots__ = (
         "_parsed_cache",
         "comm_error",
         "device_status",
+        "expanded_command",
         "header",
         "payload",
         "pdu",
@@ -117,6 +123,7 @@ class HARTIPResponse:
         device_status: int = 0,
         payload: bytes = b"",
         comm_error: bool = False,
+        expanded_command: int | None = None,
     ):
         self.header = header
         self.pdu = pdu
@@ -124,11 +131,18 @@ class HARTIPResponse:
         self.device_status = device_status
         self.payload = payload
         self.comm_error = comm_error
+        self.expanded_command = expanded_command
         self._parsed_cache = _SENTINEL
 
     @property
     def command_number(self) -> int | None:
-        """The HART command number from the PDU, or ``None`` if unavailable."""
+        """The HART command number, or ``None`` if unavailable.
+
+        For an expanded command sent through Command 31 this is the
+        expanded number (e.g. 534), not 31.
+        """
+        if self.expanded_command is not None:
+            return self.expanded_command
         if self.pdu is not None and hasattr(self.pdu, "command"):
             return self.pdu.command
         return None
@@ -215,9 +229,9 @@ class HARTIPResponse:
         if self.comm_error:
             raise HARTCommunicationError(self.response_code)
         if self.response_code != HARTResponseCode.SUCCESS:
-            cmd = 0
-            if self.pdu is not None and hasattr(self.pdu, "command"):
-                cmd = self.pdu.command
+            cmd = self.command_number
+            if cmd is None:
+                cmd = 0
             raise HARTResponseError(
                 f"HART command {cmd} failed: {self.error_message}",
                 code=self.response_code,
@@ -225,9 +239,7 @@ class HARTIPResponse:
             )
 
     def __repr__(self) -> str:
-        cmd = "?"
-        if self.pdu is not None and hasattr(self.pdu, "command"):
-            cmd = str(self.pdu.command)
+        cmd = "?" if self.command_number is None else str(self.command_number)
         status = "ok" if self.success else self.error_message
         return (
             f"HARTIPResponse(cmd={cmd}, rc={self.response_code}, "
@@ -835,6 +847,8 @@ class HARTIPClient:
         for raw in pending:
             try:
                 resp = self._parse(raw)
+                if resp.pdu is not None and resp.pdu.command == CMD_EXTENDED_CMD:
+                    self._unwrap_extended(resp, None)
             except HARTError as exc:
                 logger.debug("Dropping invalid publish frame: %s", exc)
                 continue
@@ -939,6 +953,8 @@ class HARTIPClient:
         if resp.response_code in DR_RETRY_CODES:
             resp = self._handle_delayed_response(delimiter, addr_bytes, wire_command, wire_data)
 
+        if wire_command != command:
+            self._unwrap_extended(resp, command)
         return resp
 
     @staticmethod
@@ -950,6 +966,31 @@ class HARTIPClient:
             raise HARTFrameError(
                 f"Reply carries command {resp.pdu.command}, requested {wire_command}"
             )
+
+    @staticmethod
+    def _unwrap_extended(resp: HARTIPResponse, requested: int | None) -> None:
+        """Strip the expanded command number from a Command 31 reply.
+
+        The reply data after response code and device status starts with
+        the 2-byte expanded command number (Wireshark packet-hartip.c
+        dissect_cmd31).  *requested* is the number that was sent, or
+        ``None`` for unsolicited frames, which are accepted as they come.
+        """
+        if len(resp.payload) >= 2:
+            expanded = int.from_bytes(resp.payload[:2], "big")
+            if requested is not None and expanded != requested:
+                raise HARTFrameError(
+                    f"Command 31 reply carries expanded command {expanded}, requested {requested}"
+                )
+            resp.payload = resp.payload[2:]
+            resp.expanded_command = expanded
+        elif requested is not None:
+            if resp.success:
+                raise HARTFrameError(
+                    f"Command 31 reply to {requested} lacks the expanded command number"
+                )
+            # Error replies may omit the data; report the command that was sent.
+            resp.expanded_command = requested
 
     def _handle_delayed_response(
         self,

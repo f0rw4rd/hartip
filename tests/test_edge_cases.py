@@ -622,7 +622,7 @@ class TestExtendedCommands:
 
         def capture(frame):
             frames.append(frame)
-            pdu = build_pdu(0x06, b"\x00", 31, b"\x00\x00")
+            pdu = build_pdu(0x06, b"\x00", 31, b"\x00\x00\x00\xfe")
             hdr = HARTIPHeader.build(
                 dict(
                     version=1,
@@ -654,7 +654,7 @@ class TestExtendedCommands:
 
         def capture(frame):
             frames.append(frame)
-            pdu = build_pdu(0x06, b"\x00", 31, b"\x00\x00")
+            pdu = build_pdu(0x06, b"\x00", 31, b"\x00\x00\x03\x00")
             hdr = HARTIPHeader.build(
                 dict(
                     version=1,
