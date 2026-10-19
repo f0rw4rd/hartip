@@ -12,7 +12,8 @@
 #
 # Recommended branch protection rules for 'main':
 #   1. Require pull request reviews before merging (1+ approvals)
-#   2. Require status checks to pass: lint, format, test, collect, security
+#   2. Require status checks to pass: lint, format, typecheck, test, collect,
+#      security
 #   3. Require branches to be up to date before merging
 #   4. Require signed commits
 #   5. Do not allow bypassing the above settings
@@ -85,6 +86,32 @@ jobs:
 
       - name: Run ruff format --check
         run: ruff format --check hartip/
+
+  # ── Type check ───────────────────────────────────────────────────
+  typecheck:
+    name: Type check (mypy + pyright, strict)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install package with dev dependencies
+        run: pip install -e ".[dev]"
+
+      # Both read their strict settings from pyproject.toml and check
+      # against Python 3.10, the oldest supported version.
+      - name: mypy --strict
+        run: mypy
+
+      - name: pyright (strict)
+        run: pyright
 
   # ── Test ─────────────────────────────────────────────────────────
   test:
