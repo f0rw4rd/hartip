@@ -87,7 +87,8 @@ Protocol parsing must treat device data as untrusted:
   parsers rather than hand-rolled slicing.
 - Raise from `hartip.exceptions` (`HARTError` base; `HARTIPError` subtree for
   transport: timeout, connection, TLS, status; `HARTProtocolError` subtree for
-  checksum, response and communication errors).
+  checksum, malformed frames (`HARTFrameError`, also a `ValueError`), response
+  and communication errors).
 - Use the module `logger = logging.getLogger(__name__)`, not `print()`, for
   library diagnostics. Never log PSK keys or other key material; `__repr__`
   already prints `psk_key=<redacted>`, keep it that way.

@@ -70,6 +70,14 @@ class HARTChecksumError(HARTProtocolError):
         self.actual = actual
 
 
+class HARTFrameError(HARTProtocolError, ValueError):
+    """Malformed HART-IP message or HART PDU (truncated, oversized, inconsistent).
+
+    Also a :class:`ValueError`, which the frame parsers raised before this
+    class existed, so existing ``except ValueError`` blocks keep working.
+    """
+
+
 class HARTResponseError(HARTProtocolError):
     """HART command returned an error response code."""
 

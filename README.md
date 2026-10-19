@@ -137,6 +137,7 @@ HARTError
 │   └── HARTIPStatusError
 └── HARTProtocolError
     ├── HARTChecksumError
+    ├── HARTFrameError (also a ValueError)
     ├── HARTResponseError
     └── HARTCommunicationError
 ```

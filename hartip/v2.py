@@ -29,6 +29,7 @@ from .constants import (
     HARTIPSessionStatus,
     HARTIPVersion,
 )
+from .exceptions import HARTFrameError
 from .protocol import HARTIPHeader
 
 # ---------------------------------------------------------------------------
@@ -179,10 +180,10 @@ def parse_direct_pdu_response(data: bytes) -> DirectPDU:
         Parsed :class:`DirectPDU` with response commands.
 
     Raises:
-        ValueError: If the payload is too short or malformed.
+        HARTFrameError: If the payload is too short or malformed.
     """
     if len(data) < DIRECT_PDU_HEADER_SIZE:
-        raise ValueError(
+        raise HARTFrameError(
             f"Direct PDU payload too short: {len(data)} bytes, "
             f"need at least {DIRECT_PDU_HEADER_SIZE}"
         )
@@ -194,7 +195,7 @@ def parse_direct_pdu_response(data: bytes) -> DirectPDU:
     offset = DIRECT_PDU_HEADER_SIZE
     while offset < len(data):
         if offset + DIRECT_PDU_CMD_HEADER_SIZE > len(data):
-            raise ValueError(
+            raise HARTFrameError(
                 f"Direct PDU truncated at offset {offset}: "
                 f"need {DIRECT_PDU_CMD_HEADER_SIZE} bytes for command header, "
                 f"have {len(data) - offset}"
@@ -206,7 +207,7 @@ def parse_direct_pdu_response(data: bytes) -> DirectPDU:
         offset += 1
 
         if offset + byte_count > len(data):
-            raise ValueError(
+            raise HARTFrameError(
                 f"Direct PDU command {command_number} truncated: "
                 f"byte_count={byte_count} but only {len(data) - offset} bytes remain"
             )
@@ -246,7 +247,7 @@ def parse_direct_pdu_request(data: bytes) -> DirectPDU:
         Parsed :class:`DirectPDU` with request commands.
     """
     if len(data) < DIRECT_PDU_HEADER_SIZE:
-        raise ValueError(
+        raise HARTFrameError(
             f"Direct PDU payload too short: {len(data)} bytes, "
             f"need at least {DIRECT_PDU_HEADER_SIZE}"
         )
@@ -258,7 +259,7 @@ def parse_direct_pdu_request(data: bytes) -> DirectPDU:
     offset = DIRECT_PDU_HEADER_SIZE
     while offset < len(data):
         if offset + DIRECT_PDU_CMD_HEADER_SIZE > len(data):
-            raise ValueError(
+            raise HARTFrameError(
                 f"Direct PDU truncated at offset {offset}: "
                 f"need {DIRECT_PDU_CMD_HEADER_SIZE} bytes for command header, "
                 f"have {len(data) - offset}"
@@ -270,7 +271,7 @@ def parse_direct_pdu_request(data: bytes) -> DirectPDU:
         offset += 1
 
         if offset + byte_count > len(data):
-            raise ValueError(
+            raise HARTFrameError(
                 f"Direct PDU command {command_number} truncated: "
                 f"byte_count={byte_count} but only {len(data) - offset} bytes remain"
             )
@@ -421,13 +422,13 @@ def parse_audit_log_response(data: bytes) -> AuditLogResponse:
         Parsed :class:`AuditLogResponse`.
 
     Raises:
-        ValueError: If the payload is too short or malformed.
+        HARTFrameError: If the payload is too short or malformed.
     """
     # Minimum response: start_record(1) + number_of_records(1) + power_up_time(8)
     # + last_security_change(8) + server_status(2) + session_record_size(2) = 22
     min_header = 22
     if len(data) < min_header:
-        raise ValueError(
+        raise HARTFrameError(
             f"Audit log response too short: {len(data)} bytes, need at least {min_header}"
         )
 
@@ -470,7 +471,7 @@ def _parse_session_log_record(data: bytes) -> SessionLogRecord:
         + num_request(4) + num_response(4) = 58 bytes
     """
     if len(data) < SESSION_LOG_RECORD_SIZE:
-        raise ValueError(
+        raise HARTFrameError(
             f"Session log record too short: {len(data)} bytes, need {SESSION_LOG_RECORD_SIZE}"
         )
 

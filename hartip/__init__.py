@@ -157,6 +157,7 @@ from .exceptions import (
     HARTChecksumError,
     HARTCommunicationError,
     HARTError,
+    HARTFrameError,
     HARTIPConnectionError,
     HARTIPError,
     HARTIPStatusError,
@@ -426,6 +427,7 @@ __all__ = [
     "HARTIPStatusError",
     "HARTProtocolError",
     "HARTChecksumError",
+    "HARTFrameError",
     "HARTCommunicationError",
     "HARTResponseError",
 ]

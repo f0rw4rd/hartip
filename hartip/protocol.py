@@ -25,6 +25,7 @@ from construct import (
 )
 
 from .constants import HARTIP_HEADER_SIZE, HARTIPMessageID, HARTIPMessageType
+from .exceptions import HARTFrameError
 
 # ---------------------------------------------------------------------------
 # HART-IP transport header  (8 bytes, TP10300)
@@ -174,7 +175,7 @@ def parse_pdu(data: bytes) -> object:
         byte_count, data, checksum, preamble_count, expansion_bytes.
 
     Raises:
-        ValueError: If the data is too short or malformed.
+        HARTFrameError: If the data is too short or malformed.
     """
     offset = 0
     length = len(data)
@@ -186,7 +187,7 @@ def parse_pdu(data: bytes) -> object:
         offset += 1
 
     if offset >= length:
-        raise ValueError("PDU contains only preamble bytes")
+        raise HARTFrameError("PDU contains only preamble bytes")
 
     # 2. Parse delimiter
     delimiter = data[offset]
@@ -196,7 +197,7 @@ def parse_pdu(data: bytes) -> object:
     is_long = bool(delimiter & 0x80)
     addr_len = 5 if is_long else 1
     if offset + addr_len > length:
-        raise ValueError(
+        raise HARTFrameError(
             f"PDU too short for {'long' if is_long else 'short'} address: "
             f"need {addr_len} bytes at offset {offset}, have {length - offset}"
         )
@@ -208,13 +209,13 @@ def parse_pdu(data: bytes) -> object:
     expansion_bytes = b""
     if expansion_count > 0:
         if offset + expansion_count > length:
-            raise ValueError(f"PDU too short for {expansion_count} expansion bytes")
+            raise HARTFrameError(f"PDU too short for {expansion_count} expansion bytes")
         expansion_bytes = data[offset : offset + expansion_count]
         offset += expansion_count
 
     # 5. Parse command, byte_count, data, checksum
     if offset + 2 > length:
-        raise ValueError("PDU too short for command and byte_count fields")
+        raise HARTFrameError("PDU too short for command and byte_count fields")
 
     command = data[offset]
     offset += 1
@@ -222,7 +223,7 @@ def parse_pdu(data: bytes) -> object:
     offset += 1
 
     if offset + byte_count > length:
-        raise ValueError(f"PDU byte_count={byte_count} but only {length - offset} bytes remain")
+        raise HARTFrameError(f"PDU byte_count={byte_count} but only {length - offset} bytes remain")
     pdu_data = data[offset : offset + byte_count]
     offset += byte_count
 
@@ -360,10 +361,10 @@ def parse_response(data: bytes) -> dict:
         Dict with keys ``header`` and ``pdu`` (construct-like containers).
 
     Raises:
-        ValueError: If data is too short or payload is truncated.
+        HARTFrameError: If data is too short or payload is truncated.
     """
     if len(data) < HARTIP_HEADER_SIZE:
-        raise ValueError(f"HART-IP response too short: {len(data)} bytes")
+        raise HARTFrameError(f"HART-IP response too short: {len(data)} bytes")
 
     header = HARTIPHeader.parse(data[:HARTIP_HEADER_SIZE])
 
@@ -371,7 +372,7 @@ def parse_response(data: bytes) -> dict:
     if header.payload_len > 0:
         payload_data = data[HARTIP_HEADER_SIZE:]
         if len(payload_data) < header.payload_len:
-            raise ValueError(
+            raise HARTFrameError(
                 f"HART-IP payload truncated: header claims {header.payload_len} bytes, "
                 f"got {len(payload_data)}"
             )

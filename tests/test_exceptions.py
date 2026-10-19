@@ -6,6 +6,7 @@ from hartip.exceptions import (
     HARTChecksumError,
     HARTCommunicationError,
     HARTError,
+    HARTFrameError,
     HARTIPConnectionError,
     HARTIPError,
     HARTIPStatusError,
@@ -37,6 +38,23 @@ class TestExceptionHierarchy:
 
     def test_response_is_protocol_error(self) -> None:
         assert issubclass(HARTResponseError, HARTProtocolError)
+
+    def test_frame_error_is_protocol_error_and_value_error(self) -> None:
+        assert issubclass(HARTFrameError, HARTProtocolError)
+        assert issubclass(HARTFrameError, ValueError)
+
+    def test_parsers_raise_frame_error(self) -> None:
+        from hartip.protocol import parse_pdu, parse_response
+        from hartip.v2 import parse_audit_log_response, parse_direct_pdu_response
+
+        for parse, data in [
+            (parse_pdu, b"\xff\xff"),
+            (parse_response, b"\x01\x01"),
+            (parse_direct_pdu_response, b"\x00"),
+            (parse_audit_log_response, b"\x00" * 4),
+        ]:
+            with pytest.raises(HARTFrameError):
+                parse(data)
 
     def test_communication_is_protocol_error(self) -> None:
         assert issubclass(HARTCommunicationError, HARTProtocolError)
