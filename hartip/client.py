@@ -45,6 +45,8 @@ from .constants import (
     MAX_SINGLE_BYTE_CMD,
     HARTCommand,
     HARTFrameType,
+    HARTIPMessageID,
+    HARTIPMessageType,
     HARTIPStatus,
     HARTIPVersion,
     HARTResponseCode,
@@ -52,11 +54,12 @@ from .constants import (
 from .exceptions import (
     HARTChecksumError,
     HARTCommunicationError,
+    HARTError,
+    HARTFrameError,
     HARTIPConnectionError,
     HARTIPStatusError,
     HARTIPTimeoutError,
     HARTIPTLSError,
-    HARTProtocolError,
     HARTResponseError,
 )
 from .protocol import (
@@ -363,6 +366,7 @@ class HARTIPClient:
         self.default_unique_addr: bytes | None = None
 
         self._socket: socket.socket | None = None
+        self._udp_peer: tuple[Any, ...] | None = None
         self._connected = False
         self._session_active = False
         self.server_version: int | None = None
@@ -443,6 +447,7 @@ class HARTIPClient:
             else:
                 self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 self._socket.settimeout(self.timeout)
+                self._udp_peer = self._resolve_udp_peer()
             self._connected = True
         except HARTIPTLSError:
             self._connected = False
@@ -586,13 +591,14 @@ class HARTIPClient:
         (SET_TO_NEAREST_VALUE -- server adjusted the inactivity timer)
         are accepted as valid session initiation results.
         """
-        frame = build_session_init(
-            sequence=self._next_sequence(),
-            master_type=self.master_type,
-            inactivity_timer=self.inactivity_timer,
-            version=self.version,
-        )
-        raw = self._send_recv(frame)
+        with self._lock:
+            frame = build_session_init(
+                sequence=self._next_sequence_unlocked(),
+                master_type=self.master_type,
+                inactivity_timer=self.inactivity_timer,
+                version=self.version,
+            )
+            raw = self._send_recv_unlocked(frame)
         header = HARTIPHeader.parse(raw[:HARTIP_HEADER_SIZE])
 
         _SESSION_INIT_OK = (
@@ -615,9 +621,12 @@ class HARTIPClient:
         if not self._session_active or not self._socket:
             return
         try:
-            frame = build_session_close(sequence=self._next_sequence(), version=self.version)
-            self._send_recv(frame)
-        except (OSError, HARTIPTimeoutError, HARTIPConnectionError):
+            with self._lock:
+                frame = build_session_close(
+                    sequence=self._next_sequence_unlocked(), version=self.version
+                )
+                self._send_recv_unlocked(frame)
+        except (OSError, HARTError):
             pass  # best-effort; socket may already be closed (e.g. STARTTLS failure)
         self._session_active = False
 
@@ -683,9 +692,12 @@ class HARTIPClient:
             if not self._connected or not self._session_active or not self._socket:
                 break
             try:
-                frame = build_keep_alive(sequence=self._next_sequence(), version=self.version)
-                self._send_recv(frame)
-            except (OSError, HARTIPTimeoutError, HARTIPConnectionError):
+                with self._lock:
+                    frame = build_keep_alive(
+                        sequence=self._next_sequence_unlocked(), version=self.version
+                    )
+                    self._send_recv_unlocked(frame)
+            except (OSError, HARTError):
                 logger.debug("Keep-alive failed, stopping keep-alive thread")
                 break
 
@@ -704,20 +716,88 @@ class HARTIPClient:
 
     # -- send / receive ------------------------------------------------------
 
+    def _resolve_udp_peer(self) -> tuple[Any, ...]:
+        """Resolve ``host:port`` once; replies from any other address are dropped."""
+        return socket.getaddrinfo(self.host, self.port, socket.AF_INET, socket.SOCK_DGRAM)[0][4]
+
     def _send_recv_unlocked(self, frame: bytes) -> bytes:
-        """Send a frame and receive the response (caller must hold _lock)."""
+        """Send a frame and return the reply that answers it (caller must hold _lock).
+
+        A reply answers the request when it is a Response, Error or NAK
+        message carrying the request's sequence number and message id.
+        Anything else that arrives first is skipped: unsolicited Publish
+        frames, late replies to earlier requests, and on UDP datagrams from
+        another address or too short to hold a HART-IP header.  Waiting is
+        bounded by ``timeout`` in total, not per received frame.
+
+        The returned bytes are cut to the header's ``byte_count``.
+        """
+        sequence = int.from_bytes(frame[4:6], "big")
+        msg_id = frame[2]
+        deadline = time.monotonic() + self.timeout
         try:
             if self.protocol == "tcp":
                 self._socket.sendall(frame)
-                return self._recv_tcp()
             else:
-                self._socket.sendto(frame, (self.host, self.port))
-                raw, _ = self._socket.recvfrom(65535)
+                if self._udp_peer is None:
+                    self._udp_peer = self._resolve_udp_peer()
+                self._socket.sendto(frame, self._udp_peer)
+
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise HARTIPTimeoutError("Operation timed out")
+                self._socket.settimeout(remaining)
+                raw = self._recv_tcp() if self.protocol == "tcp" else self._recv_udp()
+                if raw is None:
+                    continue
+                header = HARTIPHeader.parse(raw[:HARTIP_HEADER_SIZE])
+                if header.msg_type == HARTIPMessageType.PUBLISH:
+                    logger.debug("Skipping publish frame (seq %d)", header.sequence)
+                    continue
+                if (
+                    header.msg_type
+                    not in (
+                        HARTIPMessageType.RESPONSE,
+                        HARTIPMessageType.ERROR,
+                        HARTIPMessageType.NAK,
+                    )
+                    or header.sequence != sequence
+                    or header.msg_id != msg_id
+                ):
+                    logger.debug(
+                        "Discarding stale frame (type %d, id %d, seq %d) while waiting "
+                        "for id %d seq %d",
+                        header.msg_type,
+                        header.msg_id,
+                        header.sequence,
+                        msg_id,
+                        sequence,
+                    )
+                    continue
                 return raw
         except TimeoutError as exc:
             raise HARTIPTimeoutError("Operation timed out") from exc
         except OSError as exc:
             raise HARTIPConnectionError(f"Communication error: {exc}") from exc
+        finally:
+            with contextlib.suppress(OSError):
+                self._socket.settimeout(self.timeout)
+
+    def _recv_udp(self) -> bytes | None:
+        """Receive one datagram; ``None`` if it is not a usable reply from the peer."""
+        raw, addr = self._socket.recvfrom(65535)
+        if self._udp_peer is not None and tuple(addr[:2]) != tuple(self._udp_peer[:2]):
+            logger.debug("Dropping datagram from unexpected source %s", addr)
+            return None
+        if len(raw) < HARTIP_HEADER_SIZE:
+            logger.debug("Dropping %d-byte datagram, shorter than a HART-IP header", len(raw))
+            return None
+        byte_count = int.from_bytes(raw[6:8], "big")
+        if byte_count < HARTIP_HEADER_SIZE:
+            logger.debug("Dropping datagram with byte_count=%d", byte_count)
+            return None
+        return raw[:byte_count]
 
     def _send_recv(self, frame: bytes) -> bytes:
         """Send a frame and receive the response (thread-safe).
@@ -809,12 +889,23 @@ class HARTIPClient:
             raw = self._send_recv_unlocked(frame)
 
         resp = self._parse(raw)
+        self._check_pdu_reply(resp, wire_command)
 
         # Delayed-response retry logic
         if resp.response_code in DR_RETRY_CODES:
             resp = self._handle_delayed_response(delimiter, addr_bytes, wire_command, wire_data)
 
         return resp
+
+    @staticmethod
+    def _check_pdu_reply(resp: HARTIPResponse, wire_command: int) -> None:
+        """Reject a pass-through reply that does not carry the requested command."""
+        if resp.pdu is None:
+            raise HARTFrameError(f"Reply to command {wire_command} carries no PDU")
+        if resp.pdu.command != wire_command:
+            raise HARTFrameError(
+                f"Reply carries command {resp.pdu.command}, requested {wire_command}"
+            )
 
     def _handle_delayed_response(
         self,
@@ -848,6 +939,7 @@ class HARTIPClient:
                 raw = self._send_recv_unlocked(frame)
 
             resp = self._parse(raw)
+            self._check_pdu_reply(resp, command)
 
             if resp.response_code not in DR_RETRY_CODES:
                 return resp
@@ -862,12 +954,19 @@ class HARTIPClient:
         return resp
 
     def _recv_tcp(self) -> bytes:
-        """Receive a complete HART-IP message over TCP."""
+        """Receive a complete HART-IP message over TCP.
+
+        A ``byte_count`` below the header size leaves the stream position
+        unknown, so it raises instead of being skipped.
+        """
         header_data = self._recv_exact(HARTIP_HEADER_SIZE)
         header = HARTIPHeader.parse(header_data)
-        payload_len = max(0, header.byte_count - HARTIP_HEADER_SIZE)
-        if payload_len > 65536:
-            raise HARTProtocolError(f"Payload too large: {payload_len}")
+        if header.byte_count < HARTIP_HEADER_SIZE:
+            raise HARTFrameError(
+                f"HART-IP byte_count={header.byte_count} is smaller than the "
+                f"{HARTIP_HEADER_SIZE}-byte header"
+            )
+        payload_len = header.byte_count - HARTIP_HEADER_SIZE
         if payload_len > 0:
             payload_data = self._recv_exact(payload_len)
             return header_data + payload_data
@@ -1410,6 +1509,10 @@ def probe_server_version(
             buf.extend(chunk)
 
         header = HARTIPHeader.parse(bytes(buf))
+        if header.msg_id != HARTIPMessageID.SESSION_INITIATE or header.sequence != 1:
+            raise HARTFrameError(
+                f"Unexpected reply to version probe (id {header.msg_id}, seq {header.sequence})"
+            )
 
         # Drain any remaining body bytes
         remaining = header.byte_count - HARTIP_HEADER_SIZE

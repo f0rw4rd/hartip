@@ -22,6 +22,7 @@ from hartip.exceptions import (
     HARTFrameError,
     HARTIPConnectionError,
     HARTIPStatusError,
+    HARTIPTimeoutError,
     HARTIPTLSError,
     HARTResponseError,
 )
@@ -428,7 +429,9 @@ class TestDoubleConnect:
             mock_sock1 = MagicMock()
             mock_sock2 = MagicMock()
             mock_sock_cls.side_effect = [mock_sock1, mock_sock2]
-            mock_sock1.recvfrom.side_effect = echo_seq(mock_sock1, repeat((session_resp, _ADDR)))
+            mock_sock1.recvfrom.side_effect = echo_seq(
+                mock_sock1, [(session_resp, _ADDR), (_build_session_close_response(), _ADDR)]
+            )
             mock_sock2.recvfrom.side_effect = echo_seq(mock_sock2, repeat((session_resp, _ADDR)))
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
@@ -1263,3 +1266,123 @@ class TestResponseFrameValidation:
         resp = client._parse(_raw_msg(1, 3, 1, frame) + b"\xde\xad")
         assert resp.success
         assert resp.command_number == 1
+
+
+# ---------------------------------------------------------------------------
+# Client – matching responses to requests
+# ---------------------------------------------------------------------------
+
+# Captured from a real gateway (hart-ip_publish_and_keepAlive.pcapng, frame
+# 56): unsolicited Publish (msg_type 2) of burst Command 9, server-side
+# sequence 1, arriving on the client's session.
+_PCAP_PUBLISH_CMD9 = bytes.fromhex(
+    "01020300000100308140fd95266f091f00100100004b46386e3dc001002742a7f42c40"
+    "02003d0000000000a39f5ec285"
+)
+
+_FOREIGN_ADDR = ("10.6.6.6", 5094)
+
+
+def _cmd_reply(command: int, seq: int, msg_id: int = 3, msg_type: int = 1) -> bytes:
+    pdu = build_pdu(HARTFrameType.SHORT_FRAME, b"\x80", command, b"\x00\x00" + b"\x11" * 4)
+    return _raw_msg(msg_type, msg_id, seq, pdu)
+
+
+def _session_client(protocol: str = "udp", timeout: float = 5.0) -> HARTIPClient:
+    """Client with an active session on a mocked socket; next sequence is 1."""
+    client = HARTIPClient("127.0.0.1", protocol=protocol, timeout=timeout)
+    client._connected = True
+    client._session_active = True
+    client._socket = MagicMock()
+    return client
+
+
+class TestResponseMatching:
+    def test_stale_sequence_discarded(self) -> None:
+        """A late reply to an earlier request must not answer this one."""
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [
+            (_cmd_reply(13, seq=999), _ADDR),
+            (_cmd_reply(1, seq=1), _ADDR),
+        ]
+        resp = client.send_command(1)
+        assert resp.command_number == 1
+        assert resp.header.sequence == 1
+        assert client._socket.recvfrom.call_count == 2
+
+    def test_publish_frame_skipped(self) -> None:
+        """A real Publish frame arriving first is not returned as the response."""
+        assert _PCAP_PUBLISH_CMD9[1] == HARTIPMessageType.PUBLISH
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [
+            (_PCAP_PUBLISH_CMD9, _ADDR),
+            (_cmd_reply(1, seq=1), _ADDR),
+        ]
+        resp = client.send_command(1)
+        assert resp.header.msg_type == HARTIPMessageType.RESPONSE
+        assert resp.command_number == 1
+
+    def test_other_message_id_discarded(self) -> None:
+        """A Keep-Alive reply with the right sequence does not answer a PDU request."""
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [
+            (_raw_msg(1, 2, 1, b""), _ADDR),
+            TimeoutError(),
+        ]
+        with pytest.raises(HARTIPTimeoutError):
+            client.send_command(1)
+
+    def test_foreign_source_dropped(self) -> None:
+        """UDP datagrams from another host are ignored."""
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [
+            (_cmd_reply(1, seq=1), _FOREIGN_ADDR),
+            (_cmd_reply(1, seq=1), _ADDR),
+        ]
+        resp = client.send_command(1)
+        assert resp.command_number == 1
+        assert client._socket.recvfrom.call_count == 2
+
+    def test_runt_datagram_dropped(self) -> None:
+        """A datagram shorter than the header, or byte_count < 8, is dropped on UDP."""
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [
+            (b"\x01\x01\x03", _ADDR),
+            (bytes.fromhex("0101030000010004"), _ADDR),
+            (_cmd_reply(1, seq=1), _ADDR),
+        ]
+        assert client.send_command(1).command_number == 1
+
+    def test_command_echo_mismatch_raises(self) -> None:
+        """Right sequence, wrong command: the device answered something else."""
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [(_cmd_reply(13, seq=1), _ADDR)]
+        with pytest.raises(HARTFrameError, match="command 13"):
+            client.send_command(1)
+
+    def test_pdu_request_answered_without_pdu_raises(self) -> None:
+        client = _session_client()
+        client._socket.recvfrom.side_effect = [(_raw_msg(1, 3, 1, b""), _ADDR)]
+        with pytest.raises(HARTFrameError, match="no PDU"):
+            client.send_command(1)
+
+    def test_endless_stale_frames_time_out(self) -> None:
+        """Discarding frames is bounded by the client timeout, not unbounded."""
+        client = _session_client(timeout=0.05)
+        client._socket.recvfrom.side_effect = repeat((_cmd_reply(1, seq=42), _ADDR))
+        with pytest.raises(HARTIPTimeoutError):
+            client.send_command(1)
+
+    def test_tcp_byte_count_below_header_raises(self) -> None:
+        """On TCP a bad length desynchronises the stream, so it is an error."""
+        client = _session_client(protocol="tcp")
+        client._socket.recv.side_effect = [bytes.fromhex("0101030000010004")]
+        with pytest.raises(HARTFrameError, match="byte_count=4"):
+            client.send_command(1)
+
+    def test_close_swallows_frame_errors(self) -> None:
+        """Session close is best effort; a malformed reply must not escape close()."""
+        client = _session_client(protocol="tcp")
+        client._socket.recv.side_effect = [bytes.fromhex("0101010000010004")]
+        client.close()
+        assert not client.session_active

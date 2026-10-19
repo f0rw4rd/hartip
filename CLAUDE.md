@@ -83,6 +83,12 @@ Protocol parsing must treat device data as untrusted:
 - Check the HART-IP status byte, the HART response code and the device status
   byte separately; the communication-error bit changes the meaning of the
   response code byte (`is_comm_error`, `decode_comm_error_flags`).
+- Every request/reply goes through `HARTIPClient._send_recv_unlocked`, which
+  returns only a Response/Error/NAK with the request's sequence number and
+  message id. It skips Publish frames, stale replies, and UDP datagrams from
+  other hosts, all within one overall `timeout`. Generate the sequence number
+  and send under the same `_lock` hold. Gateways do send unsolicited Publish
+  frames on a client's session.
 - Use the `construct` structs in `protocol.py` / `v2.py` and the existing
   parsers rather than hand-rolled slicing.
 - Raise from `hartip.exceptions` (`HARTError` base; `HARTIPError` subtree for
