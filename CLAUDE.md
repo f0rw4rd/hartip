@@ -11,7 +11,8 @@ and UDP) and v2 (TLS over TCP, Direct PDU, Read Audit Log). DTLS is not
 supported because Python's `ssl` module has no DTLS.
 
 The package requires Python 3.10 or newer (`requires-python = ">=3.10"`; CI
-tests 3.10 to 3.13). `construct>=2.10` is its only runtime dependency.
+tests 3.10 to 3.15, 3.15 as a pre-release until it is final).
+`construct>=2.10` is its only runtime dependency.
 
 It is dual-licensed under GPL-3.0-only (`LICENSE`) and a commercial license
 (`LICENSE-COMMERCIAL.md`); contributions fall under the CLA in
@@ -146,7 +147,7 @@ CI (`.github/workflows/ci.yml`, push and pull request on `main`) runs:
 ```bash
 ruff check hartip/
 ruff format --check hartip/
-pytest -v                      # Python 3.10, 3.11, 3.12, 3.13
+pytest -v                      # Python 3.10 to 3.15
 pytest --collect-only -q
 vulture hartip/ vulture_whitelist.py
 bandit -c pyproject.toml -r hartip/
