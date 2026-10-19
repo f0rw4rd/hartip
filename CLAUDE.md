@@ -175,7 +175,8 @@ They skip when the hipserver or the msf-ics mock server is not reachable; the
 TLS-PSK tests also need Python 3.13+.
 
 Release (`.github/workflows/release.yml`): pushing a tag `vX.Y.Z` reruns CI,
-checks that the tag equals `project.version` in `pyproject.toml`, builds with
+checks that the tag equals `hartip.__version__` (the single version source;
+`pyproject.toml` reads it via `[tool.setuptools.dynamic]`), builds with
 `python -m build`, runs `twine check`, attests provenance, publishes to PyPI by
 trusted publishing through the `pypi` environment (approval required), and
 creates a GitHub Release with `SHA256SUMS.txt`. `workflow_dispatch` with

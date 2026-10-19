@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hartip-py"
-version = "0.3.0"
+dynamic = ["version"]
 description = "HART-IP protocol library for Python"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -55,6 +55,9 @@ dev = [
 Homepage = "https://github.com/f0rw4rd/hartip"
 Repository = "https://github.com/f0rw4rd/hartip"
 Issues = "https://github.com/f0rw4rd/hartip/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "hartip.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
