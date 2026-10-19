@@ -27,6 +27,7 @@ from hartip.exceptions import (
     HARTResponseError,
 )
 from hartip.protocol import HARTIPHeader, build_pdu, xor_checksum
+from hartip.response import decode_response
 from tests._mocks import echo_seq, tcp_echo_seq
 
 # ---------------------------------------------------------------------------
@@ -1069,11 +1070,11 @@ class TestCiphersParameter:
             version=2,
             ciphers=HARTIP_V2_PSK_CIPHERS,
         )
-        assert client._ciphers == HARTIP_V2_PSK_CIPHERS
+        assert client._tls.ciphers == HARTIP_V2_PSK_CIPHERS
 
     def test_default_ciphers_is_none(self) -> None:
         client = HARTIPClient("127.0.0.1")
-        assert client._ciphers is None
+        assert client._tls.ciphers is None
 
 
 # ---------------------------------------------------------------------------
@@ -1226,7 +1227,7 @@ class TestCertValidator:
     def test_no_validator_by_default(self) -> None:
         """Without cert_validator, no post-handshake check runs."""
         client = HARTIPClient("127.0.0.1")
-        assert client._cert_validator is None
+        assert client._tls.cert_validator is None
 
 
 # ---------------------------------------------------------------------------
@@ -1248,22 +1249,19 @@ class TestResponseFrameValidation:
         """
         frame = bytes([0x06, 0x80, 0x01, 0x03, 0x00, 0x84, 0x5A])
         assert xor_checksum(frame[:-1]) == 0
-        client = HARTIPClient("127.0.0.1")
         with pytest.raises(HARTFrameError, match="checksum"):
-            client._parse(_raw_msg(1, 3, 1, frame))
+            decode_response(_raw_msg(1, 3, 1, frame))
 
     def test_trailing_byte_is_frame_error_not_checksum_error(self) -> None:
         """Bytes after the checksum inside byte_count are a malformed frame."""
         frame = bytes.fromhex("06800102000085") + b"\x00"
-        client = HARTIPClient("127.0.0.1")
         with pytest.raises(HARTFrameError, match="trailing"):
-            client._parse(_raw_msg(1, 3, 1, frame))
+            decode_response(_raw_msg(1, 3, 1, frame))
 
     def test_datagram_bytes_beyond_byte_count_ignored(self) -> None:
         """Excess datagram bytes past byte_count do not reach the checksum check."""
         frame = bytes.fromhex("06800102000085")
-        client = HARTIPClient("127.0.0.1")
-        resp = client._parse(_raw_msg(1, 3, 1, frame) + b"\xde\xad")
+        resp = decode_response(_raw_msg(1, 3, 1, frame) + b"\xde\xad")
         assert resp.success
         assert resp.command_number == 1
 

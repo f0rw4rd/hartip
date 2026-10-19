@@ -38,7 +38,7 @@ from .device import (
 )
 
 if TYPE_CHECKING:
-    from .client import HARTIPResponse
+    from .response import HARTIPResponse
     from .types import Cmd2Response, Cmd48Response, EmptyResponse
 
 logger = logging.getLogger(__name__)

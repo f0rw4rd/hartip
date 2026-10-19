@@ -32,7 +32,7 @@ Quickstart::
 """
 
 from .ascii import pack_ascii, unpack_ascii
-from .client import HARTIPClient, HARTIPResponse, probe_server_version
+from .client import HARTIPClient
 from .constants import (
     COMM_ERROR_MASK,
     DEFAULT_INACTIVITY_TIMER,
@@ -192,6 +192,7 @@ from .lookups import (
     hart_ticks_to_seconds,
     hart_ticks_to_timedelta,
 )
+from .probe import probe_server_version
 from .protocol import (
     HARTIPHeader,
     HARTPdu,
@@ -208,6 +209,7 @@ from .protocol import (
     parse_response,
     xor_checksum,
 )
+from .response import HARTIPResponse
 from .types import (
     Cmd2Response,
     Cmd3Response,

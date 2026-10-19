@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from hartip._transport import recv_exact, recv_tcp_frame
 from hartip.ascii import _6bit_to_ascii, _ascii_to_6bit, pack_ascii, unpack_ascii
 from hartip.client import HARTIPClient, HARTIPResponse
 from hartip.constants import (
@@ -92,6 +93,7 @@ from hartip.protocol import (
     parse_response,
     xor_checksum,
 )
+from hartip.response import decode_response
 from hartip.units import UNITS, get_unit_name
 from hartip.v2 import (
     AuditLogResponse,
@@ -258,9 +260,8 @@ class TestChecksumValidation:
         )
         raw = header + pdu_bad
 
-        client = HARTIPClient("127.0.0.1")
         with pytest.raises(HARTChecksumError):
-            client._parse(raw)
+            decode_response(raw)
 
 
 class TestHeaderByteCount:
@@ -428,16 +429,14 @@ class TestClientParsing:
     def test_non_success_status_raises(self):
         """Non-zero HART-IP status raises HARTIPStatusError."""
         raw = self._make_response(status=2)  # ERROR status code
-        client = HARTIPClient("127.0.0.1")
         with pytest.raises(HARTIPStatusError):
-            client._parse(raw)
+            decode_response(raw)
 
     def test_unknown_status_code(self):
         """Unknown status code (99) still raises with string representation."""
         raw = self._make_response(status=99)
-        client = HARTIPClient("127.0.0.1")
         with pytest.raises(HARTIPStatusError, match="status 99"):
-            client._parse(raw)
+            decode_response(raw)
 
     def test_header_only_response(self):
         """Response with byte_count=8 (no PDU) returns pdu=None."""
@@ -451,8 +450,7 @@ class TestClientParsing:
                 byte_count=8,
             )
         )
-        client = HARTIPClient("127.0.0.1")
-        resp = client._parse(header)
+        resp = decode_response(header)
         assert resp.pdu is None
         assert resp.response_code == 0
         assert resp.payload == b""
@@ -460,16 +458,14 @@ class TestClientParsing:
     def test_pdu_data_0_bytes(self):
         """PDU with byte_count=0: response_code=0, payload=b''."""
         raw = self._make_response(pdu_data=b"")
-        client = HARTIPClient("127.0.0.1")
-        resp = client._parse(raw)
+        resp = decode_response(raw)
         assert resp.response_code == 0
         assert resp.payload == b""
 
     def test_pdu_data_1_byte(self):
         """PDU with 1 data byte: response_code extracted, no device_status."""
         raw = self._make_response(pdu_data=b"\x05")
-        client = HARTIPClient("127.0.0.1")
-        resp = client._parse(raw)
+        resp = decode_response(raw)
         assert resp.response_code == 5
         assert resp.device_status == 0
         assert resp.payload == b""
@@ -477,8 +473,7 @@ class TestClientParsing:
     def test_pdu_data_2_bytes(self):
         """PDU with 2 data bytes: response_code + device_status, no payload."""
         raw = self._make_response(pdu_data=b"\x00\x40")
-        client = HARTIPClient("127.0.0.1")
-        resp = client._parse(raw)
+        resp = decode_response(raw)
         assert resp.response_code == 0
         assert resp.device_status == 0x40
         assert resp.payload == b""
@@ -486,8 +481,7 @@ class TestClientParsing:
     def test_comm_error_flag_detected(self):
         """MSB set in response code byte → comm_error=True."""
         raw = self._make_response(pdu_data=b"\xc2\x00")
-        client = HARTIPClient("127.0.0.1")
-        resp = client._parse(raw)
+        resp = decode_response(raw)
         assert resp.comm_error is True
         assert resp.response_code == 0xC2
         assert resp.success is False
@@ -495,8 +489,7 @@ class TestClientParsing:
     def test_comm_error_1_byte_pdu(self):
         """Comm error detected even with just 1 PDU data byte."""
         raw = self._make_response(pdu_data=b"\x82")
-        client = HARTIPClient("127.0.0.1")
-        resp = client._parse(raw)
+        resp = decode_response(raw)
         assert resp.comm_error is True
 
 
@@ -1835,7 +1828,7 @@ class TestRecvTcpEdges:
         client._socket.recv = mock_recv
         # This will try to recv 65527 bytes, and recv will return empty → ConnectionError
         with pytest.raises(HARTIPConnectionError):
-            client._recv_tcp()
+            recv_tcp_frame(client._socket)
 
     def test_recv_exact_connection_closed(self):
         """recv() returning empty bytes → HARTIPConnectionError."""
@@ -1843,12 +1836,11 @@ class TestRecvTcpEdges:
         client._socket = MagicMock()
         client._socket.recv.return_value = b""
         with pytest.raises(HARTIPConnectionError, match="Connection closed"):
-            client._recv_exact(8)
+            recv_exact(client._socket, 8)
 
     def test_recv_exact_zero_bytes(self):
         """Requesting 0 bytes returns immediately."""
-        client = HARTIPClient("127.0.0.1", protocol="tcp")
-        result = client._recv_exact(0)
+        result = recv_exact(MagicMock(), 0)
         assert result == b""
 
 
