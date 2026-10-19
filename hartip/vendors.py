@@ -2,7 +2,7 @@
 HART manufacturer ID lookup table.
 
 Source: FieldComm Group registered manufacturer list (551 entries).
-Generated from oida_device_database.json (FieldComm Group Support Portal).
+Generated from the FieldComm Group Support Portal device database.
 """
 
 from __future__ import annotations
