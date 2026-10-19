@@ -104,6 +104,25 @@ with HARTIPClient("192.168.1.100", protocol="tcp", version=2, ssl_context=ctx) a
     resp = client.read_unique_id()
 ```
 
+## Publish (burst) frames
+
+Devices in burst mode, and gateways with an active subscription, send unsolicited
+Publish frames on the client's session. The client skips them while it waits for
+the reply to a request. To receive them, pass a callback:
+
+```python
+from hartip import HARTIPClient
+
+def on_publish(resp):
+    print(resp.command_number, resp.parsed)
+
+with HARTIPClient("192.168.1.100", protocol="tcp", on_publish=on_publish) as client:
+    client.read_primary_variable()
+```
+
+Publish frames are only read while a request is outstanding; there is no
+background reader. Frames that fail validation are dropped.
+
 ## Error handling
 
 ```python

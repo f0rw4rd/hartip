@@ -1386,3 +1386,60 @@ class TestResponseMatching:
         client._socket.recv.side_effect = [bytes.fromhex("0101010000010004")]
         client.close()
         assert not client.session_active
+
+
+class TestOnPublish:
+    def _client(self, callback) -> HARTIPClient:
+        client = HARTIPClient("127.0.0.1", on_publish=callback)
+        client._connected = True
+        client._session_active = True
+        client._socket = MagicMock()
+        return client
+
+    def test_callback_receives_parsed_publish(self) -> None:
+        seen = []
+        client = self._client(seen.append)
+        client._socket.recvfrom.side_effect = [
+            (_PCAP_PUBLISH_CMD9, _ADDR),
+            (_cmd_reply(1, seq=1), _ADDR),
+        ]
+        resp = client.send_command(1)
+        assert resp.command_number == 1
+        assert len(seen) == 1
+        assert seen[0].header.msg_type == HARTIPMessageType.PUBLISH
+        assert seen[0].command_number == 9
+
+    def test_callback_may_use_the_client(self) -> None:
+        """The callback runs after the client lock is released (no deadlock)."""
+        lock_states = []
+        client = self._client(lambda _resp: lock_states.append(client._lock.locked()))
+        client._socket.recvfrom.side_effect = [
+            (_PCAP_PUBLISH_CMD9, _ADDR),
+            (_cmd_reply(1, seq=1), _ADDR),
+        ]
+        client.send_command(1)
+        assert lock_states == [False]
+
+    def test_callback_exception_is_logged_not_raised(self, caplog) -> None:
+        def _boom(_resp):
+            raise RuntimeError("callback failed")
+
+        client = self._client(_boom)
+        client._socket.recvfrom.side_effect = [
+            (_PCAP_PUBLISH_CMD9, _ADDR),
+            (_cmd_reply(1, seq=1), _ADDR),
+        ]
+        with caplog.at_level("ERROR", logger="hartip.client"):
+            assert client.send_command(1).command_number == 1
+        assert "on_publish" in caplog.text
+
+    def test_malformed_publish_not_delivered(self) -> None:
+        seen = []
+        client = self._client(seen.append)
+        bad = _PCAP_PUBLISH_CMD9[:-1] + bytes([_PCAP_PUBLISH_CMD9[-1] ^ 0xFF])
+        client._socket.recvfrom.side_effect = [
+            (bad, _ADDR),
+            (_cmd_reply(1, seq=1), _ADDR),
+        ]
+        assert client.send_command(1).command_number == 1
+        assert seen == []

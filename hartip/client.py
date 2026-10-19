@@ -25,6 +25,7 @@ import ssl
 import threading
 import time
 import warnings
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 if TYPE_CHECKING:
@@ -278,6 +279,14 @@ class HARTIPClient:
         ssl_context: Optional pre-configured :class:`ssl.SSLContext`.
             If provided, ``psk_identity``/``psk_key``/``ciphers``/``ca_certs``
             /``certfile``/``keyfile`` are ignored.
+        on_publish: Optional callback ``(HARTIPResponse) -> None`` for
+            unsolicited Publish frames (burst-mode data) that arrive while
+            the client waits for a reply.  Frames that fail validation are
+            not delivered.  It runs after the client lock is released, on
+            the thread that made the request (the keep-alive thread for
+            frames read during a keep-alive), so it may use the client;
+            exceptions it raises are logged.  Publish frames are only read while a
+            request is outstanding; there is no background reader.
 
     Usage::
 
@@ -316,6 +325,7 @@ class HARTIPClient:
         keyfile: str | None = None,
         cert_validator: Callable[[dict[str, Any]], bool] | None = None,
         ssl_context: ssl.SSLContext | None = None,
+        on_publish: Callable[[HARTIPResponse], None] | None = None,
     ):
         self.host = host
         self.protocol = protocol.lower()
@@ -372,6 +382,8 @@ class HARTIPClient:
         self.server_version: int | None = None
         self._sequence = 0
         self._lock = threading.Lock()
+        self._on_publish = on_publish
+        self._pending_publishes: list[bytes] = []
 
         # Keep-alive thread state
         self._keepalive_thread: threading.Thread | None = None
@@ -591,7 +603,7 @@ class HARTIPClient:
         (SET_TO_NEAREST_VALUE -- server adjusted the inactivity timer)
         are accepted as valid session initiation results.
         """
-        with self._lock:
+        with self._request():
             frame = build_session_init(
                 sequence=self._next_sequence_unlocked(),
                 master_type=self.master_type,
@@ -621,7 +633,7 @@ class HARTIPClient:
         if not self._session_active or not self._socket:
             return
         try:
-            with self._lock:
+            with self._request():
                 frame = build_session_close(
                     sequence=self._next_sequence_unlocked(), version=self.version
                 )
@@ -692,7 +704,7 @@ class HARTIPClient:
             if not self._connected or not self._session_active or not self._socket:
                 break
             try:
-                with self._lock:
+                with self._request():
                     frame = build_keep_alive(
                         sequence=self._next_sequence_unlocked(), version=self.version
                     )
@@ -753,7 +765,10 @@ class HARTIPClient:
                     continue
                 header = HARTIPHeader.parse(raw[:HARTIP_HEADER_SIZE])
                 if header.msg_type == HARTIPMessageType.PUBLISH:
-                    logger.debug("Skipping publish frame (seq %d)", header.sequence)
+                    if self._on_publish is not None:
+                        self._pending_publishes.append(raw)
+                    else:
+                        logger.debug("Skipping publish frame (seq %d)", header.sequence)
                     continue
                 if (
                     header.msg_type
@@ -799,13 +814,42 @@ class HARTIPClient:
             return None
         return raw[:byte_count]
 
+    @contextlib.contextmanager
+    def _request(self) -> Iterator[None]:
+        """Hold ``_lock`` for one exchange, then deliver queued publish frames.
+
+        Delivery happens after the lock is released so an ``on_publish``
+        callback can call back into the client without deadlocking.
+        """
+        try:
+            with self._lock:
+                yield
+        finally:
+            self._deliver_publishes()
+
+    def _deliver_publishes(self) -> None:
+        if not self._pending_publishes:
+            return
+        with self._lock:
+            pending, self._pending_publishes = self._pending_publishes, []
+        for raw in pending:
+            try:
+                resp = self._parse(raw)
+            except HARTError as exc:
+                logger.debug("Dropping invalid publish frame: %s", exc)
+                continue
+            try:
+                self._on_publish(resp)
+            except Exception:
+                logger.exception("on_publish callback raised")
+
     def _send_recv(self, frame: bytes) -> bytes:
         """Send a frame and receive the response (thread-safe).
 
         All send/receive operations are serialized under _lock
         to prevent response mix-ups in multi-threaded usage.
         """
-        with self._lock:
+        with self._request():
             return self._send_recv_unlocked(frame)
 
     def send_command(
@@ -877,7 +921,7 @@ class HARTIPClient:
             wire_data = command.to_bytes(2, "big") + data
 
         # Hold lock for entire sequence-generate + send + receive cycle
-        with self._lock:
+        with self._request():
             frame = build_request(
                 sequence=self._next_sequence_unlocked(),
                 delimiter=delimiter,
@@ -927,7 +971,7 @@ class HARTIPClient:
         for retry in range(self.dr_retries):
             time.sleep(delay)
 
-            with self._lock:
+            with self._request():
                 frame = build_request(
                     sequence=self._next_sequence_unlocked(),
                     delimiter=delimiter,
@@ -1387,7 +1431,7 @@ class HARTIPClient:
         if not self._session_active:
             raise HARTIPConnectionError("No active session (call connect() first)")
 
-        with self._lock:
+        with self._request():
             frame = build_direct_pdu_request(
                 sequence=self._next_sequence_unlocked(),
                 commands=commands,
@@ -1438,7 +1482,7 @@ class HARTIPClient:
         if not self._session_active:
             raise HARTIPConnectionError("No active session (call connect() first)")
 
-        with self._lock:
+        with self._request():
             frame = build_audit_log_request(
                 sequence=self._next_sequence_unlocked(),
                 start_record=start_record,
