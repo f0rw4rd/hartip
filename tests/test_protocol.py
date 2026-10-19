@@ -8,6 +8,7 @@ from hartip.constants import (
     HARTIPMessageID,
     HARTIPMessageType,
 )
+from hartip.exceptions import HARTFrameError
 from hartip.protocol import (
     HARTIPHeader,
     HARTPdu,
@@ -170,6 +171,28 @@ class TestParseResponse:
     def test_too_short_raises(self) -> None:
         with pytest.raises(ValueError, match="too short"):
             parse_response(b"\x01\x02\x03")
+
+    # Command 1 ACK frame: 06 80 01 02 00 00 85 (checksum 0x85).
+    _CMD1_ACK = bytes.fromhex("06800102000085")
+
+    def test_byte_count_below_header_size_raises(self) -> None:
+        """byte_count=4 cannot describe a message that has an 8-byte header."""
+        raw = bytes.fromhex("0101030000010004") + self._CMD1_ACK
+        with pytest.raises(HARTFrameError, match="byte_count=4"):
+            parse_response(raw)
+
+    def test_trailing_bytes_inside_byte_count_raise(self) -> None:
+        """A byte after the PDU checksum that byte_count still covers."""
+        raw = bytes.fromhex("0101030000010010") + self._CMD1_ACK + b"\x00"
+        with pytest.raises(HARTFrameError, match="1 trailing byte"):
+            parse_response(raw)
+
+    def test_bytes_beyond_byte_count_ignored(self) -> None:
+        """A datagram longer than byte_count: the excess is not part of the message."""
+        raw = bytes.fromhex("010103000001000f") + self._CMD1_ACK + b"\xde\xad"
+        result = parse_response(raw)
+        assert result["pdu"].command == 1
+        assert result["pdu"].checksum == 0x85
 
 
 # ---------------------------------------------------------------------------

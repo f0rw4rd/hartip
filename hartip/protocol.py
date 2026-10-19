@@ -371,15 +371,27 @@ def parse_response(data: bytes) -> dict:
         raise HARTFrameError(f"HART-IP response too short: {len(data)} bytes")
 
     header = HARTIPHeader.parse(data[:HARTIP_HEADER_SIZE])
+    if header.byte_count < HARTIP_HEADER_SIZE:
+        raise HARTFrameError(
+            f"HART-IP byte_count={header.byte_count} is smaller than the "
+            f"{HARTIP_HEADER_SIZE}-byte header"
+        )
 
     pdu = None
     if header.payload_len > 0:
-        payload_data = data[HARTIP_HEADER_SIZE:]
+        # Bytes past byte_count (e.g. a padded datagram) are not part of
+        # this message.
+        payload_data = data[HARTIP_HEADER_SIZE : HARTIP_HEADER_SIZE + header.payload_len]
         if len(payload_data) < header.payload_len:
             raise HARTFrameError(
                 f"HART-IP payload truncated: header claims {header.payload_len} bytes, "
                 f"got {len(payload_data)}"
             )
         pdu = parse_pdu(payload_data)
+        trailing = len(payload_data) - pdu.checksum_offset - 1
+        if trailing:
+            raise HARTFrameError(
+                f"{trailing} trailing byte(s) after the PDU checksum inside byte_count"
+            )
 
     return {"header": header, "pdu": pdu}

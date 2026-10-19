@@ -1248,3 +1248,18 @@ class TestResponseFrameValidation:
         client = HARTIPClient("127.0.0.1")
         with pytest.raises(HARTFrameError, match="checksum"):
             client._parse(_raw_msg(1, 3, 1, frame))
+
+    def test_trailing_byte_is_frame_error_not_checksum_error(self) -> None:
+        """Bytes after the checksum inside byte_count are a malformed frame."""
+        frame = bytes.fromhex("06800102000085") + b"\x00"
+        client = HARTIPClient("127.0.0.1")
+        with pytest.raises(HARTFrameError, match="trailing"):
+            client._parse(_raw_msg(1, 3, 1, frame))
+
+    def test_datagram_bytes_beyond_byte_count_ignored(self) -> None:
+        """Excess datagram bytes past byte_count do not reach the checksum check."""
+        frame = bytes.fromhex("06800102000085")
+        client = HARTIPClient("127.0.0.1")
+        resp = client._parse(_raw_msg(1, 3, 1, frame) + b"\xde\xad")
+        assert resp.success
+        assert resp.command_number == 1
