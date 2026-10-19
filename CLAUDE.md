@@ -153,6 +153,11 @@ vulture hartip/ vulture_whitelist.py
 bandit -c pyproject.toml -r hartip/
 ```
 
+`.github/workflows/auto-format.yml` runs `ruff format hartip/` on pull
+requests to `main` and pushes a `style: auto-format with ruff` commit to the
+PR branch when it changes anything. It is kept out of `ci.yml` so the reusable
+CI workflow never holds `contents: write`.
+
 `.pre-commit-config.yaml` uses three stages: pre-commit (`ruff check --fix`,
 `ruff format`, vulture), pre-push (bandit, `python -m pytest tests/ -x -q`) and
 commit-msg (`.githooks/no-ai-coauthor`). Install each stage's hook type for it
