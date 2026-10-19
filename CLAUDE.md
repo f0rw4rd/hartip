@@ -51,7 +51,8 @@ or gateway must be tested against an isolated, non-safety-critical device.
   Docker via `docker-compose.yml` / `run.sh`, plus tests against the msf-ics
   Python mock server)
 - `examples/`: numbered runnable scripts (`01_basic_read.py` to
-  `07_tls_psk_auth.py`)
+  `07_tls_psk_auth.py`), indexed in `examples/README.md`; keep the index in
+  step when adding or renaming one
 - `vulture_whitelist.py`: vulture allowlist for public API that looks unused
 
 `ref/` (specs, dissectors, reference implementations, pcaps, `SOURCES.md`) and
