@@ -324,7 +324,7 @@ SESSION_LOG_RECORD_SIZE = 58
 
 
 class HARTIPServerStatus(IntFlag):
-    """Server status flags from Read Audit Log response (TP10300 Section 10.3.2.6)."""
+    """Server status flags from Read Audit Log response (HCF_SPEC-085 Section 10.3.2.6)."""
 
     NONE = 0x0000
     UNABLE_TO_LOCATE_SYSLOG_SERVER = 0x0001
@@ -333,7 +333,7 @@ class HARTIPServerStatus(IntFlag):
 
 
 class HARTIPSessionStatus(IntFlag):
-    """Session status summary flags (TP10300 Section 10.3.2.6)."""
+    """Session status summary flags (HCF_SPEC-085 Section 10.3.2.6)."""
 
     NONE = 0x0000
     WRITES_OCCURRED = 0x0001

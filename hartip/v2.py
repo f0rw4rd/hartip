@@ -2,7 +2,7 @@
 HART-IP v2 protocol extensions.
 
 Adds Direct PDU (msg_id=4) and Read Audit Log (msg_id=5) support,
-as specified by TP10300 rev 2020.
+added in HCF_SPEC-085 (Network Management Specification) Rev 3.0.
 
 Reference implementations:
 - FieldCommGroup/hipserver hscommands.cpp (DMCommands class)
@@ -33,7 +33,7 @@ from .exceptions import HARTFrameError
 from .protocol import HARTIPHeader
 
 # ---------------------------------------------------------------------------
-# Direct PDU (msg_id=4) -- TP10300 Section 10.3.2.5
+# Direct PDU (msg_id=4) -- HCF_SPEC-085 Section 10.3.2.5
 # ---------------------------------------------------------------------------
 #
 # Native HART-IP framing without the serial token-passing wrapper.
@@ -295,7 +295,7 @@ def parse_direct_pdu_request(data: bytes) -> DirectPDU:
 
 
 # ---------------------------------------------------------------------------
-# Read Audit Log (msg_id=5) -- TP10300 Section 10.3.2.6
+# Read Audit Log (msg_id=5) -- HCF_SPEC-085 Section 10.3.2.6
 # ---------------------------------------------------------------------------
 #
 # Request payload:

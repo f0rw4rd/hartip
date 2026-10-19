@@ -32,7 +32,7 @@ from .exceptions import HARTFrameError
 # ---------------------------------------------------------------------------
 #   Offset  Size  Field
 #   0       1     version      (always 1 for plaintext)
-#   1       1     msg_type     (0=request, 1=response, 2=publish, 15=NAK)
+#   1       1     msg_type     (0=request, 1=response, 2=publish, 3=error, 15=NAK)
 #   2       1     msg_id       (message ID: 0=session init, 3=HART PDU)
 #   3       1     status       (0=success, see HARTIPStatus)
 #   4       2     sequence     (big-endian sequence number)

@@ -598,7 +598,7 @@ def parse_cmd48(payload: bytes) -> Cmd48Response | dict:
         Byte 11:     standardized_status_2 (if bodylen >= 13)
         Byte 12:     standardized_status_3 (if bodylen >= 13)
         Byte 13:     analog_channel_fixed (if bodylen >= 14)
-        Bytes 14-24: additional device_specific_status (if bodylen >= 24)
+        Bytes 14-24: additional device_specific_status (if bodylen >= 25)
 
     Returns:
         Dict with parsed fields. Returns empty dict if payload < 6 bytes.

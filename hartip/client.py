@@ -886,7 +886,7 @@ class HARTIPClient:
 
         Args:
             command: HART command number (0-65535).
-            address: Polling address (0-15) for short frame.
+            address: Polling address (0-63) for short frame.
             data: Command payload bytes.
             use_long_frame: Use 5-byte unique address.
             unique_addr: Explicit 5-byte unique address. When provided,
@@ -1195,7 +1195,7 @@ class HARTIPClient:
         """Command 9: Read Device Variables with Status.
 
         Args:
-            address: Polling address (0-15) for short frame.
+            address: Polling address (0-63) for short frame.
             device_var_codes: Device variable codes to read (1-8 codes).
                 Defaults to ``(0, 1, 2, 3)`` for PV, SV, TV, QV.
                 The HART spec requires at least 1 code in the request.
