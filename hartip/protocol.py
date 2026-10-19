@@ -12,6 +12,7 @@ All multi-byte integers are big-endian as per the HART specification.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypedDict
 
 from construct import (
     Bytes,
@@ -58,6 +59,43 @@ HARTIPHeader = Struct(
 ``byte_count`` is the total message length (header + payload).
 ``payload_len`` is a computed field: ``byte_count - 8``.
 """
+
+
+@dataclass(frozen=True)
+class MessageHeader:
+    """Parsed HART-IP header, returned by :func:`parse_header`."""
+
+    version: int
+    msg_type: int
+    msg_id: int
+    status: int
+    sequence: int
+    byte_count: int  # total message length, header included
+
+    @property
+    def payload_len(self) -> int:
+        """Body length announced by ``byte_count`` (never negative)."""
+        return max(0, self.byte_count - HARTIP_HEADER_SIZE)
+
+
+def parse_header(data: bytes) -> MessageHeader:
+    """Parse the 8-byte HART-IP header at the start of *data*.
+
+    Raises:
+        HARTFrameError: If *data* is shorter than the header.
+    """
+    if len(data) < HARTIP_HEADER_SIZE:
+        raise HARTFrameError(f"HART-IP message too short: {len(data)} bytes")
+    c = HARTIPHeader.parse(data[:HARTIP_HEADER_SIZE])
+    return MessageHeader(
+        version=c.version,
+        msg_type=c.msg_type,
+        msg_id=c.msg_id,
+        status=c.status,
+        sequence=c.sequence,
+        byte_count=c.byte_count,
+    )
+
 
 # ---------------------------------------------------------------------------
 # HART PDU frame
@@ -164,7 +202,14 @@ def build_pdu(
     return frame_no_cksum + bytes([checksum])
 
 
-def parse_pdu(data: bytes) -> object:
+def _take(data: bytes, offset: int, count: int, error: str) -> bytes:
+    """Return ``data[offset:offset + count]`` or raise *error* if it is short."""
+    if offset + count > len(data):
+        raise HARTFrameError(error)
+    return data[offset : offset + count]
+
+
+def parse_pdu(data: bytes) -> PduContainer:
     """Parse a HART PDU frame, handling preambles and expansion bytes.
 
     This function:
@@ -177,67 +222,46 @@ def parse_pdu(data: bytes) -> object:
         data: Raw PDU bytes, possibly prefixed with preamble bytes.
 
     Returns:
-        A :class:`PduContainer` with fields: delimiter, address, command,
-        byte_count, data, checksum, preamble_count, expansion_bytes,
-        checksum_offset.
+        A :class:`PduContainer`.
 
     Raises:
         HARTFrameError: If the data is too short or malformed.
     """
-    offset = 0
-    length = len(data)
-
-    # 1. Skip preamble bytes (0xFF)
-    preamble_count = 0
-    while offset < length and data[offset] == 0xFF:
-        preamble_count += 1
-        offset += 1
-
-    if offset >= length:
+    preamble_count = len(data) - len(data.lstrip(b"\xff"))
+    if preamble_count == len(data):
         raise HARTFrameError("PDU contains only preamble bytes")
-
-    # 2. Parse delimiter
+    offset = preamble_count
     delimiter = data[offset]
     offset += 1
 
-    # 3. Parse address (determined by bit 7 of delimiter)
-    is_long = bool(delimiter & 0x80)
-    addr_len = 5 if is_long else 1
-    if offset + addr_len > length:
-        raise HARTFrameError(
-            f"PDU too short for {'long' if is_long else 'short'} address: "
-            f"need {addr_len} bytes at offset {offset}, have {length - offset}"
-        )
-    address = data[offset : offset + addr_len]
+    # Address length follows from bit 7 of the delimiter.
+    addr_len = 5 if delimiter & 0x80 else 1
+    address = _take(
+        data,
+        offset,
+        addr_len,
+        f"PDU too short for {'long' if addr_len == 5 else 'short'} address: "
+        f"need {addr_len} bytes at offset {offset}, have {len(data) - offset}",
+    )
     offset += addr_len
 
-    # 4. Parse expansion bytes (delimiter bits 5-6)
+    # Delimiter bits 5-6 give the number of expansion bytes.
     expansion_count = (delimiter >> 5) & 0x03
-    expansion_bytes = b""
-    if expansion_count > 0:
-        if offset + expansion_count > length:
-            raise HARTFrameError(f"PDU too short for {expansion_count} expansion bytes")
-        expansion_bytes = data[offset : offset + expansion_count]
-        offset += expansion_count
+    expansion_bytes = _take(
+        data, offset, expansion_count, f"PDU too short for {expansion_count} expansion bytes"
+    )
+    offset += expansion_count
 
-    # 5. Parse command, byte_count, data, checksum
-    if offset + 2 > length:
-        raise HARTFrameError("PDU too short for command and byte_count fields")
-
-    command = data[offset]
-    offset += 1
-    byte_count = data[offset]
-    offset += 1
-
-    if offset + byte_count > length:
-        raise HARTFrameError(f"PDU byte_count={byte_count} but only {length - offset} bytes remain")
-    pdu_data = data[offset : offset + byte_count]
+    command, byte_count = _take(data, offset, 2, "PDU too short for command and byte_count fields")
+    offset += 2
+    pdu_data = _take(
+        data,
+        offset,
+        byte_count,
+        f"PDU byte_count={byte_count} but only {len(data) - offset} bytes remain",
+    )
     offset += byte_count
-
-    if offset >= length:
-        raise HARTFrameError("PDU truncated: missing checksum byte")
-    checksum_offset = offset
-    checksum = data[checksum_offset]
+    (checksum,) = _take(data, offset, 1, "PDU truncated: missing checksum byte")
 
     return PduContainer(
         delimiter=delimiter,
@@ -248,7 +272,7 @@ def parse_pdu(data: bytes) -> object:
         checksum=checksum,
         preamble_count=preamble_count,
         expansion_bytes=expansion_bytes,
-        checksum_offset=checksum_offset,
+        checksum_offset=offset,
     )
 
 
@@ -358,7 +382,14 @@ def build_request(
     return header + pdu
 
 
-def parse_response(data: bytes) -> dict:
+class ParsedMessage(TypedDict):
+    """Result of :func:`parse_response`."""
+
+    header: MessageHeader
+    pdu: PduContainer | None  # None for a header-only message
+
+
+def parse_response(data: bytes) -> ParsedMessage:
     """Parse a complete HART-IP response (header + PDU).
 
     Handles preamble bytes and expansion bytes in the PDU payload.
@@ -367,7 +398,7 @@ def parse_response(data: bytes) -> dict:
         data: Raw response bytes (at least 8 bytes).
 
     Returns:
-        Dict with keys ``header`` and ``pdu`` (construct-like containers).
+        :class:`ParsedMessage` with the ``header`` and the ``pdu``.
 
     Raises:
         HARTFrameError: If data is too short or payload is truncated.
@@ -375,7 +406,7 @@ def parse_response(data: bytes) -> dict:
     if len(data) < HARTIP_HEADER_SIZE:
         raise HARTFrameError(f"HART-IP response too short: {len(data)} bytes")
 
-    header = HARTIPHeader.parse(data[:HARTIP_HEADER_SIZE])
+    header = parse_header(data)
     if header.byte_count < HARTIP_HEADER_SIZE:
         raise HARTFrameError(
             f"HART-IP byte_count={header.byte_count} is smaller than the "
