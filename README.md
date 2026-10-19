@@ -22,7 +22,7 @@ Supports HART-IP v1 (plaintext, TCP/UDP) and v2 (TLS, Direct PDU, Audit Log). DT
 - **High-level API**: `Device` caches identity (Commands 0/13/20) and reads process values on access
 - **Multidrop**: address each device on a loop by poll address or unique address
 - **Declarative parsing**: wire structs via the [construct](https://construct.readthedocs.io/) library
-- **Typed**: ships `py.typed`
+- **Typed**: ships `py.typed`; parsers return `TypedDict`s (empty dict when the payload is too short)
 
 ## Requirements
 

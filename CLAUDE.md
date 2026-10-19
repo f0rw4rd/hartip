@@ -23,12 +23,25 @@ or gateway must be tested against an isolated, non-safety-critical device.
 
 ## Repository layout
 
-- `hartip/client.py`: `HARTIPClient` and `HARTIPResponse`; socket management
-  (TCP/UDP), session initiate/close/keep-alive, sequence numbers, TLS and
-  STARTTLS, checksum validation, extended commands via Command 31,
-  delayed-response retries, `probe_server_version()`
+- `hartip/client.py`: `HARTIPClient`; socket management (TCP/UDP), session
+  initiate/close/keep-alive, sequence numbers, STARTTLS, the request/reply
+  exchange (`_exchange`, `_send_recv_unlocked`), delayed-response retries,
+  Direct PDU and Read Audit Log requests
+- `hartip/response.py`: `HARTIPResponse` and reply decoding:
+  `decode_response()` (HART-IP status, checksum, response code / device
+  status / payload split), `check_pdu_reply()`, `unwrap_extended()`
+  (Command 31)
+- `hartip/_tls.py`: `TLSSettings`, the client's TLS options; builds the
+  `SSLContext` and runs the handshake and `cert_validator`
+- `hartip/_transport.py`: TCP/UDP frame reads (`recv_exact`,
+  `recv_tcp_frame`, `recv_udp_frame`) and `classify_frame()`, which decides
+  whether a frame answers the outstanding request
+- `hartip/_commands.py`: `CommandsMixin` with the `read_*` / `write_*`
+  convenience wrappers and the typed `UNSET` address sentinel
+- `hartip/probe.py`: `probe_server_version()`
 - `hartip/protocol.py`: `construct` structs for the HART-IP header and HART PDU
-  frames, `build_pdu()` / `parse_pdu()` / `parse_response()`
+  frames, `build_pdu()` / `parse_header()` (typed `MessageHeader`) /
+  `parse_pdu()` / `parse_response()`
 - `hartip/constants.py`: protocol enums (message types and ids, HART-IP status,
   response codes, commands, device status, comm error flags), ports, cipher
   strings
@@ -45,7 +58,11 @@ or gateway must be tested against an isolated, non-safety-critical device.
 - `hartip/units.py`: engineering unit code table (`UNITS`)
 - `hartip/vendors.py`: manufacturer id table (`MANUFACTURERS`)
 - `hartip/ascii.py`: HART 6-bit packed ASCII
-- `hartip/types.py`: `TypedDict` return shapes for the parsers
+- `hartip/types.py`: `TypedDict` return shapes for the parsers; a parser
+  returns `CmdNNResponse | EmptyResponse`, the latter for a payload too short
+  to decode
+- `typings/construct/`: stub for the subset of `construct` hartip uses
+  (construct ships no type information); `mypy_path` / `stubPath` point here
 - `hartip/exceptions.py`: the exception hierarchy
 - `tests/`: unit tests (`test_*.py`) and `tests/integration/`: Docker
   services in `docker-compose.yml` / `run.sh` (FieldComm hipserver v1 on
@@ -106,9 +123,12 @@ Protocol parsing must treat device data as untrusted:
   `CERT_REQUIRED` and `check_hostname=True`. Never weaken these defaults, the
   TLS 1.2 minimum, or certificate validation merely to make a test pass.
 
-Keep socket and session mechanics in `client.py`, wire structs in
-`protocol.py` / `v2.py`, payload parsing in `device.py`, and tables in
-`lookups.py` / `units.py` / `vendors.py`.
+Keep socket and session mechanics in `client.py`, reply decoding in
+`response.py`, TLS setup in `_tls.py`, frame I/O in `_transport.py`, command
+wrappers in `_commands.py`, wire structs in `protocol.py` / `v2.py`, payload
+parsing in `device.py`, and tables in `lookups.py` / `units.py` /
+`vendors.py`. `hartip.client` still re-exports `HARTIPResponse`,
+`probe_server_version` and `_UNSET` for existing importers.
 
 ## Public API
 
@@ -158,6 +178,8 @@ CI (`.github/workflows/ci.yml`, push and pull request on `main`) runs:
 ```bash
 ruff check hartip/
 ruff format --check hartip/
+mypy                           # strict, config in pyproject.toml
+pyright                        # strict, config in pyproject.toml
 pytest -v                      # Python 3.10 to 3.15
 pytest --collect-only -q
 vulture hartip/ vulture_whitelist.py
@@ -175,8 +197,15 @@ commit-msg (`.githooks/no-ai-coauthor`). Install each stage's hook type for it
 to run.
 
 Ruff targets py310 with a 100-character line length; the rule set and
-per-file ignores are in `pyproject.toml`. MyPy is not configured in this
-repository. Bandit skips B101, B104 and B311; vulture uses
+per-file ignores are in `pyproject.toml`. Ruff's C90 rule fails any function
+above McCabe complexity 10; split it rather than raising the limit.
+
+mypy (`strict = true`, `warn_unreachable`) and pyright (`typeCheckingMode =
+"strict"`) both check `hartip/` against Python 3.10 and must stay at zero
+errors. Prefer precise types over `Any`: TypedDicts from `types.py` for
+parser results, `MessageHeader` / `PduContainer` for frames. Code that needs
+a newer stdlib API goes behind an `if sys.version_info >= (3, N):` block (see
+`_tls.py`). Bandit skips B101, B104 and B311; vulture uses
 `min_confidence = 80`.
 
 `addopts = "-m 'not integration'"` deselects integration tests by default, so
