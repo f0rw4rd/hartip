@@ -1395,12 +1395,10 @@ class TestDirectPDUEdges:
             parse_direct_pdu_response(data)
 
     def test_parse_response_byte_count_0(self):
-        """Command with byte_count=0: response_code=0, data=b''."""
+        """Command with byte_count=0 has no response code: malformed, not success."""
         data = b"\x00\x00" + b"\x00\x00\x00"  # cmd=0, bc=0
-        result = parse_direct_pdu_response(data)
-        assert len(result.commands) == 1
-        assert result.commands[0].response_code == 0
-        assert result.commands[0].data == b""
+        with pytest.raises(HARTFrameError):
+            parse_direct_pdu_response(data)
 
     def test_parse_response_mixed_success_failure(self):
         """Two commands: first succeeds, second fails."""
@@ -1482,12 +1480,11 @@ class TestAuditLogEdges:
         assert result.records == []
 
     def test_parse_record_count_mismatch(self):
-        """Claims 2 records but only 1 present (truncated)."""
+        """Claims 2 records but only 1 present (truncated): raises."""
         record = b"\x00" * 58  # minimal session log record
         data = bytes([0, 2]) + b"\x00" * 16 + b"\x00\x00" + b"\x00\x3a" + record
-        result = parse_audit_log_response(data)
-        # Should parse 1 record, not crash
-        assert len(result.records) == 1
+        with pytest.raises(HARTFrameError, match="truncated"):
+            parse_audit_log_response(data)
 
     def test_session_log_record_too_short(self):
         from hartip.v2 import _parse_session_log_record

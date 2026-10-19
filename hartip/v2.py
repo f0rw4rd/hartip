@@ -212,12 +212,13 @@ def parse_direct_pdu_response(data: bytes) -> DirectPDU:
                 f"byte_count={byte_count} but only {len(data) - offset} bytes remain"
             )
 
-        if byte_count >= 1:
-            response_code = data[offset]
-            cmd_data = bytes(data[offset + 1 : offset + byte_count])
-        else:
-            response_code = 0
-            cmd_data = b""
+        if byte_count == 0:
+            # The response code is mandatory in a response entry (CISA
+            # hart_ip.spicy DirectPDUContentsResponse); inventing 0 would
+            # report success for a malformed reply.
+            raise HARTFrameError(f"Direct PDU command {command_number}: no response code")
+        response_code = data[offset]
+        cmd_data = bytes(data[offset + 1 : offset + byte_count])
 
         commands.append(
             DirectPDUCommand(
@@ -439,13 +440,22 @@ def parse_audit_log_response(data: bytes) -> AuditLogResponse:
     server_status = Int16ub.parse(data[18:20])
     session_record_size = Int16ub.parse(data[20:22])
 
+    if number_of_records and session_record_size < SESSION_LOG_RECORD_SIZE:
+        raise HARTFrameError(
+            f"Audit log session_record_size={session_record_size} is smaller than the "
+            f"{SESSION_LOG_RECORD_SIZE}-byte record layout"
+        )
+    needed = min_header + number_of_records * session_record_size
+    if len(data) < needed:
+        raise HARTFrameError(
+            f"Audit log truncated: {number_of_records} records of {session_record_size} "
+            f"bytes need {needed} bytes, got {len(data)}"
+        )
+
     records: List[SessionLogRecord] = []
     offset = min_header
 
     for _ in range(number_of_records):
-        if offset + session_record_size > len(data):
-            break  # truncated -- parse what we can
-
         record = _parse_session_log_record(data[offset : offset + session_record_size])
         records.append(record)
         offset += session_record_size

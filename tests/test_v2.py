@@ -27,6 +27,7 @@ from hartip.constants import (
     HARTIPSessionStatus,
     HARTIPVersion,
 )
+from hartip.exceptions import HARTFrameError
 from hartip.protocol import HARTIPHeader
 from hartip.v2 import (
     AuditLogResponse,
@@ -261,12 +262,15 @@ class TestParseDirectPDUResponse:
         assert result.commands[1].response_code == 0
         assert result.commands[1].data == b"\xaa\xbb"
 
-    def test_zero_byte_count_command(self):
-        # Command with byte_count=0 (no response code or data)
+    def test_zero_byte_count_command_raises(self):
+        """A response entry must carry its response code (spicy DirectPDUContentsResponse)."""
         payload = b"\x00\x00" + b"\x00\x00\x00"
-        result = parse_direct_pdu_response(payload)
-        assert len(result.commands) == 1
-        assert result.commands[0].response_code == 0
+        with pytest.raises(HARTFrameError, match="no response code"):
+            parse_direct_pdu_response(payload)
+
+    def test_zero_byte_count_request_entry_allowed(self):
+        """Request entries carry no response code, so byte_count=0 is valid there."""
+        result = parse_direct_pdu_request(b"\x00\x00" + b"\x00\x00\x00")
         assert result.commands[0].data == b""
 
     def test_too_short_raises(self):
@@ -516,14 +520,28 @@ class TestParseAuditLogResponse:
         with pytest.raises(ValueError, match="too short"):
             parse_audit_log_response(b"\x00" * 10)
 
-    def test_truncated_records_parsed_partially(self):
-        """If records are truncated, parse what we can."""
+    def test_truncated_records_raise(self):
+        """Fewer records than number_of_records is a truncated response."""
         record = _build_session_log_record()
-        # Claim 2 records but only provide 1
         payload = _build_audit_log_response(number_of_records=2, records=[record])
-        result = parse_audit_log_response(payload)
-        # Should parse 1 of the 2 claimed records
-        assert len(result.records) == 1
+        with pytest.raises(HARTFrameError, match="2 records"):
+            parse_audit_log_response(payload)
+
+    def test_record_size_below_layout_raises(self):
+        """A session_record_size smaller than the 58-byte record layout."""
+        payload = _build_audit_log_response(
+            number_of_records=1, session_record_size=40, records=[b"\x00" * 40]
+        )
+        with pytest.raises(HARTFrameError, match="session_record_size=40"):
+            parse_audit_log_response(payload)
+
+    def test_larger_record_size_steps_over_extra_bytes(self):
+        """Records larger than 58 bytes (newer servers) are read at the server's stride."""
+        rec = _build_session_log_record() + b"\xee" * 6
+        payload = _build_audit_log_response(
+            number_of_records=2, session_record_size=len(rec), records=[rec, rec]
+        )
+        assert len(parse_audit_log_response(payload).records) == 2
 
     def test_zero_records(self):
         payload = _build_audit_log_response(number_of_records=0, records=[])
