@@ -79,6 +79,7 @@ port 5094 (UDP and TCP):
 ```bash
 ./tests/integration/run.sh --keep
 python examples/01_basic_read.py 127.0.0.1 5094
+python examples/07_tls_psk_auth.py 127.0.0.1 --port 5095   # hipserver -psk
 ```
 
 Only point these scripts at real devices on an isolated, non-safety-critical

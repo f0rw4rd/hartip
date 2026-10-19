@@ -21,10 +21,9 @@ Usage:
     python examples/07_tls_psk_auth.py 127.0.0.1 --port 5094 --no-tls
 
 Note on PSK key format:
-    The --key is the raw PSK bytes as a hex string.  The FieldComm
-    hipserver stores keys as the ASCII hex string + null terminator
-    (a hipserver quirk), so the default key value below is pre-encoded
-    for the hipserver default configuration.
+    The --key is the raw PSK bytes as a hex string.  hipserver's
+    hipServer.conf stores the same key as hex text and decodes it to
+    bytes, so pass that hex string unchanged.
 """
 
 import argparse
@@ -39,9 +38,9 @@ from hartip import (
     probe_server_version,
 )
 
-# hipserver default PSK: the ASCII hex string "7777772e68617274636f6d6d2e6f7267"
-# plus a null terminator (hipserver stores the JSON key value as raw chars).
-HIPSERVER_DEFAULT_KEY = b"7777772e68617274636f6d6d2e6f7267\x00"
+# hipserver default PSK slot: key "7777772e68617274636f6d6d2e6f7267" in
+# hipServer.conf, the bytes of "www.hartcomm.org".
+HIPSERVER_DEFAULT_KEY = bytes.fromhex("7777772e68617274636f6d6d2e6f7267")
 
 
 def parse_args():
