@@ -114,6 +114,7 @@ class PduContainer:
     checksum: int
     preamble_count: int = 0
     expansion_bytes: bytes = b""
+    checksum_offset: int = 0  # index of the checksum byte in the parsed buffer
 
     def __repr__(self) -> str:
         return (
@@ -171,8 +172,9 @@ def parse_pdu(data: bytes) -> object:
         data: Raw PDU bytes, possibly prefixed with preamble bytes.
 
     Returns:
-        A construct Container with fields: delimiter, address, command,
-        byte_count, data, checksum, preamble_count, expansion_bytes.
+        A :class:`PduContainer` with fields: delimiter, address, command,
+        byte_count, data, checksum, preamble_count, expansion_bytes,
+        checksum_offset.
 
     Raises:
         HARTFrameError: If the data is too short or malformed.
@@ -227,9 +229,10 @@ def parse_pdu(data: bytes) -> object:
     pdu_data = data[offset : offset + byte_count]
     offset += byte_count
 
-    checksum = 0
-    if offset < length:
-        checksum = data[offset]
+    if offset >= length:
+        raise HARTFrameError("PDU truncated: missing checksum byte")
+    checksum_offset = offset
+    checksum = data[checksum_offset]
 
     return PduContainer(
         delimiter=delimiter,
@@ -240,6 +243,7 @@ def parse_pdu(data: bytes) -> object:
         checksum=checksum,
         preamble_count=preamble_count,
         expansion_bytes=expansion_bytes,
+        checksum_offset=checksum_offset,
     )
 
 

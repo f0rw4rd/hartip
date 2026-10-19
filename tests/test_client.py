@@ -19,12 +19,13 @@ from hartip.constants import (
 from hartip.device import parse_cmd0, parse_cmd1, parse_cmd3
 from hartip.exceptions import (
     HARTCommunicationError,
+    HARTFrameError,
     HARTIPConnectionError,
     HARTIPStatusError,
     HARTIPTLSError,
     HARTResponseError,
 )
-from hartip.protocol import HARTIPHeader, build_pdu
+from hartip.protocol import HARTIPHeader, build_pdu, xor_checksum
 from tests._mocks import echo_seq, tcp_echo_seq
 
 # ---------------------------------------------------------------------------
@@ -1223,3 +1224,27 @@ class TestCertValidator:
         """Without cert_validator, no post-handshake check runs."""
         client = HARTIPClient("127.0.0.1")
         assert client._cert_validator is None
+
+
+# ---------------------------------------------------------------------------
+# Client – response frame validation
+# ---------------------------------------------------------------------------
+
+
+def _raw_msg(msg_type: int, msg_id: int, seq: int, body: bytes, status: int = 0) -> bytes:
+    """HART-IP message with an explicit header, byte_count = 8 + len(body)."""
+    return struct.pack(">BBBBHH", 1, msg_type, msg_id, status, seq, 8 + len(body)) + body
+
+
+class TestResponseFrameValidation:
+    def test_pdu_without_checksum_byte_rejected(self) -> None:
+        """A truncated PDU must not pass just because its bytes XOR to 0.
+
+        Data is 00 84 5a: the frame without its last byte XORs to 0, which
+        the old code compared against a defaulted checksum of 0.
+        """
+        frame = bytes([0x06, 0x80, 0x01, 0x03, 0x00, 0x84, 0x5A])
+        assert xor_checksum(frame[:-1]) == 0
+        client = HARTIPClient("127.0.0.1")
+        with pytest.raises(HARTFrameError, match="checksum"):
+            client._parse(_raw_msg(1, 3, 1, frame))

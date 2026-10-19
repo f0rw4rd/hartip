@@ -72,6 +72,7 @@ from hartip.device import (
 from hartip.exceptions import (
     HARTChecksumError,
     HARTCommunicationError,
+    HARTFrameError,
     HARTIPConnectionError,
     HARTIPStatusError,
     HARTIPTimeoutError,
@@ -186,9 +187,15 @@ class TestTruncatedPackets:
             parse_pdu(b"\x02\x00\x01\x0a\xaa\xbb")
 
     def test_pdu_missing_checksum(self):
-        """PDU with byte_count=0 and no checksum byte returns checksum=0."""
-        pdu = parse_pdu(b"\x02\x00\x01\x00")
-        assert pdu.checksum == 0
+        """PDU that ends right after its data has no checksum byte and must raise."""
+        with pytest.raises(HARTFrameError, match="checksum"):
+            parse_pdu(b"\x02\x00\x01\x00")
+
+    def test_pdu_checksum_offset(self):
+        """checksum_offset points at the checksum byte, after any preambles."""
+        pdu = parse_pdu(b"\xff\xff\x02\x80\x00\x00\x82")
+        assert pdu.checksum_offset == 6
+        assert pdu.checksum == 0x82
 
     def test_pdu_with_expansion_bytes(self):
         """Delimiter bits 5-6 indicate 2 expansion bytes."""

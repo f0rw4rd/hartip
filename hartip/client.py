@@ -903,14 +903,11 @@ class HARTIPClient:
         if pdu is None:
             return HARTIPResponse(header=header, pdu=None)
 
-        # Validate checksum -- skip preamble bytes (0xFF), they are not
-        # included in the XOR checksum per HART spec (Go reference: calcCrc
-        # starts after preambles).
+        # Validate checksum -- the XOR covers delimiter through the last data
+        # byte; preamble bytes (0xFF) are excluded per HART spec (Go
+        # reference: calcCrc starts after preambles).
         pdu_bytes = data[HARTIP_HEADER_SIZE:]
-        preamble_skip = getattr(pdu, "preamble_count", 0)
-        frame_after_preambles = pdu_bytes[preamble_skip:]
-        frame_without_cksum = frame_after_preambles[:-1]
-        expected = xor_checksum(frame_without_cksum)
+        expected = xor_checksum(pdu_bytes[pdu.preamble_count : pdu.checksum_offset])
         if expected != pdu.checksum:
             raise HARTChecksumError(expected, pdu.checksum)
 
