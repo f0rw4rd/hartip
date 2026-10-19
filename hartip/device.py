@@ -1108,6 +1108,13 @@ def parse_cmd105(payload: bytes) -> Cmd105Response | EmptyResponse:
         "burst_mode_control": payload[0],
         "command_number_legacy": payload[1],
     }
+    _parse_cmd105_burst(payload, result)
+    _parse_cmd105_trigger(payload, result)
+    return result
+
+
+def _parse_cmd105_burst(payload: bytes, result: Cmd105Response) -> None:
+    """Fill the Command 105 fields of bytes 2-21 that *payload* covers."""
     if len(payload) >= 10:
         result["device_variable_index_list"] = list(payload[2:10])
     if len(payload) >= 12:
@@ -1123,6 +1130,10 @@ def parse_cmd105(payload: bytes) -> Cmd105Response | EmptyResponse:
         max_burst_ticks = Int32ub.parse(payload[18:22])
         result["max_burst_comm_period"] = max_burst_ticks
         result["max_burst_comm_period_seconds"] = hart_ticks_to_seconds(max_burst_ticks)
+
+
+def _parse_cmd105_trigger(payload: bytes, result: Cmd105Response) -> None:
+    """Fill the Command 105 trigger fields (bytes 22-28) that *payload* covers."""
     if len(payload) >= 23:
         result["trigger_mode"] = payload[22]
     if len(payload) >= 24:
@@ -1133,7 +1144,6 @@ def parse_cmd105(payload: bytes) -> Cmd105Response | EmptyResponse:
         result["trigger_unit_name"] = get_unit_name(payload[24])
     if len(payload) >= 29:
         result["trigger_value"] = Float32b.parse(payload[25:29])
-    return result
 
 
 def parse_cmd107(payload: bytes) -> Cmd107Response | EmptyResponse:
