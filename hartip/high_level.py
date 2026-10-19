@@ -19,12 +19,34 @@ Example::
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from .client import HARTIPClient
-from .device import DeviceInfo, DeviceVariable, Variable
+from .device import (
+    DeviceInfo,
+    DeviceVariable,
+    Variable,
+    parse_cmd0,
+    parse_cmd1,
+    parse_cmd2,
+    parse_cmd3,
+    parse_cmd9,
+    parse_cmd12,
+    parse_cmd13,
+    parse_cmd20,
+    parse_cmd48,
+)
+
+if TYPE_CHECKING:
+    from .client import HARTIPResponse
+    from .types import Cmd2Response, Cmd48Response, EmptyResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _payload(resp: HARTIPResponse) -> bytes:
+    """The reply data of a successful response, else ``b""``."""
+    return resp.payload if resp.success else b""
 
 
 class Device:
@@ -71,9 +93,9 @@ class Device:
         self._client.connect()
 
         # Command 0 -- read unique ID (also sets default_unique_addr)
-        resp = self._client.read_unique_id()
-        if resp.success and resp.parsed is not None:
-            self._info = resp.parsed
+        payload = _payload(self._client.read_unique_id())
+        if payload:
+            self._info = parse_cmd0(payload)
         else:
             logger.warning("Command 0 did not return valid identity")
 
@@ -84,20 +106,19 @@ class Device:
         """Issue Commands 13 and 20 to populate tag / long_tag fields."""
         # Command 13 -- tag, descriptor, date
         try:
-            resp13 = self._client.read_tag_descriptor_date()
-            if resp13.success and resp13.parsed:
-                data = resp13.parsed
-                self._info.tag = data.get("tag", "")
-                self._info.descriptor = data.get("descriptor", "")
-                self._info.date = data.get("date", "")
+            data = parse_cmd13(_payload(self._client.read_tag_descriptor_date()))
+            if "tag" in data:
+                self._info.tag = data["tag"]
+                self._info.descriptor = data["descriptor"]
+                self._info.date = data["date"]
         except Exception:
             logger.debug("Command 13 failed, tag/descriptor unavailable", exc_info=True)
 
         # Command 20 -- long tag (HART 6+)
         try:
-            resp20 = self._client.read_long_tag()
-            if resp20.success and resp20.parsed is not None:
-                self._info.long_tag = resp20.parsed
+            payload = _payload(self._client.read_long_tag())
+            if payload:
+                self._info.long_tag = parse_cmd20(payload)
         except Exception:
             logger.debug("Command 20 failed, long_tag unavailable", exc_info=True)
 
@@ -201,26 +222,22 @@ class Device:
         Returns a :class:`Variable` with ``value``, ``unit_code``, and
         ``unit_name``, or ``None`` on failure.
         """
-        resp = self._client.read_primary_variable()
-        if resp.success:
-            return resp.parsed
-        return None
+        return parse_cmd1(_payload(self._client.read_primary_variable()))
+
+    def _current_and_percent(self) -> Cmd2Response | EmptyResponse:
+        return parse_cmd2(_payload(self._client.read_current_and_percent()))
 
     @property
     def loop_current(self) -> Optional[float]:
         """Read loop current in mA (Command 2)."""
-        resp = self._client.read_current_and_percent()
-        if resp.success and resp.parsed:
-            return resp.parsed.get("current_mA")
-        return None
+        data = self._current_and_percent()
+        return data.get("current_mA")
 
     @property
     def percent_range(self) -> Optional[float]:
         """Read percent of range (Command 2)."""
-        resp = self._client.read_current_and_percent()
-        if resp.success and resp.parsed:
-            return resp.parsed.get("percent_range")
-        return None
+        data = self._current_and_percent()
+        return data.get("percent_range")
 
     @property
     def dynamic_variables(self) -> list[Variable]:
@@ -229,10 +246,8 @@ class Device:
         Returns a list of :class:`Variable` objects (PV, SV, TV, QV).
         Returns an empty list on failure.
         """
-        resp = self._client.read_dynamic_variables()
-        if resp.success and resp.parsed:
-            return resp.parsed.get("variables", [])
-        return []
+        data = parse_cmd3(_payload(self._client.read_dynamic_variables()))
+        return data.get("variables", [])
 
     def device_variables(
         self,
@@ -247,24 +262,20 @@ class Device:
             List of :class:`DeviceVariable` objects, or empty list on failure.
         """
         resp = self._client.read_device_vars_status(device_var_codes=var_codes)
-        if resp.success and resp.parsed:
-            return resp.parsed.get("variables", [])
-        return []
+        data = parse_cmd9(_payload(resp))
+        return data.get("variables", [])
 
     @property
-    def status(self) -> dict:
+    def status(self) -> Cmd48Response | EmptyResponse:
         """Read additional device status (Command 48).
 
         Returns the full parsed dict from Command 48, or an empty dict
         on failure.
         """
-        resp = self._client.read_additional_status()
-        if resp.success and resp.parsed:
-            return resp.parsed
-        return {}
+        return parse_cmd48(_payload(self._client.read_additional_status()))
 
     @property
-    def additional_status(self) -> dict:
+    def additional_status(self) -> Cmd48Response | EmptyResponse:
         """Alias for :attr:`status` (Command 48)."""
         return self.status
 
@@ -274,7 +285,4 @@ class Device:
 
         Returns the 32-character message string, or empty string on failure.
         """
-        resp = self._client.read_message()
-        if resp.success and resp.parsed is not None:
-            return resp.parsed
-        return ""
+        return parse_cmd12(_payload(self._client.read_message()))

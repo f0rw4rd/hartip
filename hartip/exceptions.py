@@ -99,7 +99,7 @@ class HARTCommunicationError(HARTProtocolError):
     """
 
     def __init__(self, flags: int):
-        parts = []
+        parts: list[str] = []
         if flags & 0x40:
             parts.append("vertical_parity")
         if flags & 0x20:

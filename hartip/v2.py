@@ -114,7 +114,7 @@ class DirectPDU:
 
     device_status: int = 0
     extended_status: int = 0
-    commands: list[DirectPDUCommand] = field(default_factory=list)
+    commands: list[DirectPDUCommand] = field(default_factory=list[DirectPDUCommand])
 
     def __iter__(self) -> Iterator[DirectPDUCommand]:
         return iter(self.commands)
@@ -368,7 +368,7 @@ class AuditLogResponse:
     last_security_change: int = 0  # seconds since epoch
     server_status: int = 0
     session_record_size: int = SESSION_LOG_RECORD_SIZE
-    records: List[SessionLogRecord] = field(default_factory=list)
+    records: List[SessionLogRecord] = field(default_factory=list[SessionLogRecord])
 
     @property
     def server_status_flags(self) -> HARTIPServerStatus:

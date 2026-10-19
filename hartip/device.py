@@ -12,18 +12,42 @@ Aliases: 6→7, 11→0, 17→12, 18→13, 19→16, 21→0, 22→20
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 if TYPE_CHECKING:
     from .types import (
         Cmd2Response,
         Cmd3Response,
+        Cmd7Response,
         Cmd8Response,
         Cmd9Response,
         Cmd13Response,
+        Cmd14Response,
         Cmd15Response,
+        Cmd16Response,
+        Cmd33Response,
+        Cmd35Response,
+        Cmd38Response,
+        Cmd44Response,
         Cmd48Response,
+        Cmd52Response,
+        Cmd53Response,
         Cmd54Response,
+        Cmd71Response,
+        Cmd76Response,
+        Cmd79Response,
+        Cmd90Response,
+        Cmd95Response,
+        Cmd103Response,
+        Cmd104Response,
+        Cmd105Response,
+        Cmd107Response,
+        Cmd108Response,
+        Cmd109Response,
+        Cmd512Response,
+        Cmd534Response,
+        DeviceVariableStatus,
+        EmptyResponse,
     )
 
 from construct import Float32b, Int16ub, Int32ub
@@ -82,7 +106,7 @@ class DeviceVariable:
         return get_classification_name(self.classification)
 
     @property
-    def status_decoded(self) -> dict:
+    def status_decoded(self) -> DeviceVariableStatus:
         """Decoded device variable status byte sub-fields."""
         return decode_device_variable_status(self.status)
 
@@ -357,7 +381,7 @@ def parse_cmd1(payload: bytes) -> Optional[Variable]:
     return Variable(value=value, unit_code=unit_code, label="PV")
 
 
-def parse_cmd2(payload: bytes) -> Cmd2Response | dict:
+def parse_cmd2(payload: bytes) -> Cmd2Response | EmptyResponse:
     """Parse Command 2 (Read Loop Current and Percent of Range).
 
     Format (8 bytes): current(4 float) + percent(4 float)
@@ -369,7 +393,7 @@ def parse_cmd2(payload: bytes) -> Cmd2Response | dict:
     return {"current_mA": current, "percent_range": percent}
 
 
-def parse_cmd3(payload: bytes) -> Cmd3Response | dict:
+def parse_cmd3(payload: bytes) -> Cmd3Response | EmptyResponse:
     """Parse Command 3 (Read Dynamic Variables).
 
     Format: current(4 float) + up to 4 x [unit_code(1) + value(4 float)]
@@ -397,7 +421,7 @@ def parse_cmd3(payload: bytes) -> Cmd3Response | dict:
     return {"loop_current": current, "variables": variables}
 
 
-def parse_cmd9(payload: bytes) -> Cmd9Response | dict:
+def parse_cmd9(payload: bytes) -> Cmd9Response | EmptyResponse:
     """Parse Command 9 (Read Device Variables with Status) response.
 
     Format (Wireshark dissector, packet-hartip.c:664-733)::
@@ -481,7 +505,7 @@ def parse_cmd12(payload: bytes) -> str:
     return unpack_ascii(payload[:24])
 
 
-def parse_cmd13(payload: bytes) -> Cmd13Response | dict:
+def parse_cmd13(payload: bytes) -> Cmd13Response | EmptyResponse:
     """Parse Command 13 (Read Tag, Descriptor, Date).
 
     Format: tag(6 packed) + descriptor(12 packed) + day(1) + month(1) + year(1)
@@ -500,7 +524,7 @@ def parse_cmd13(payload: bytes) -> Cmd13Response | dict:
     }
 
 
-def parse_cmd14(payload: bytes) -> dict:
+def parse_cmd14(payload: bytes) -> Cmd14Response | EmptyResponse:
     """Parse Command 14 (Read PV Transducer Information) response.
 
     Format (16 bytes, from Wireshark dissector packet-hartip.c:757-768)::
@@ -530,7 +554,7 @@ def parse_cmd14(payload: bytes) -> dict:
     }
 
 
-def parse_cmd15(payload: bytes) -> Cmd15Response | dict:
+def parse_cmd15(payload: bytes) -> Cmd15Response | EmptyResponse:
     """Parse Command 15 (Read Output Information) response.
 
     Format (18 bytes, from Wireshark dissector packet-hartip.c:774-783)::
@@ -584,7 +608,7 @@ def parse_cmd20(payload: bytes) -> str:
     return payload[:32].decode("ascii", errors="replace").rstrip("\x00 ")
 
 
-def parse_cmd48(payload: bytes) -> Cmd48Response | dict:
+def parse_cmd48(payload: bytes) -> Cmd48Response | EmptyResponse:
     """Parse Command 48 (Read Additional Device Status) response.
 
     Format (Wireshark dissector packet-hartip.c:848-879)::
@@ -606,7 +630,7 @@ def parse_cmd48(payload: bytes) -> Cmd48Response | dict:
     if len(payload) < 6:
         return {}
 
-    result: dict = {
+    result: Cmd48Response = {
         "device_specific_status": payload[0:6],
     }
 
@@ -641,7 +665,7 @@ def parse_cmd48(payload: bytes) -> Cmd48Response | dict:
 # ---------------------------------------------------------------------------
 
 
-def parse_cmd7(payload: bytes) -> dict:
+def parse_cmd7(payload: bytes) -> Cmd7Response | EmptyResponse:
     """Parse Command 7 (Read Loop Configuration) response.
 
     Also used for Command 6 (Write Polling Address) response — same format.
@@ -663,7 +687,7 @@ def parse_cmd7(payload: bytes) -> dict:
 parse_cmd6 = parse_cmd7
 
 
-def parse_cmd8(payload: bytes) -> Cmd8Response | dict:
+def parse_cmd8(payload: bytes) -> Cmd8Response | EmptyResponse:
     """Parse Command 8 (Read Dynamic Variable Classifications) response.
 
     Format (4 bytes, Wireshark dissect_cmd8, hipflowapp cmd_08.h)::
@@ -693,7 +717,7 @@ def parse_cmd8(payload: bytes) -> Cmd8Response | dict:
 parse_cmd11 = parse_cmd0
 
 
-def parse_cmd16(payload: bytes) -> dict:
+def parse_cmd16(payload: bytes) -> Cmd16Response | EmptyResponse:
     """Parse Command 16 (Read Final Assembly Number) response.
 
     Also used for Command 19 (Write Final Assembly Number) response.
@@ -724,7 +748,7 @@ parse_cmd21 = parse_cmd0
 parse_cmd22 = parse_cmd20
 
 
-def parse_cmd33(payload: bytes) -> dict:
+def parse_cmd33(payload: bytes) -> Cmd33Response | EmptyResponse:
     """Parse Command 33 (Read Device Variables) response.
 
     Format (Wireshark dissect_cmd33, up to 4 slots of 6 bytes each)::
@@ -756,7 +780,7 @@ def parse_cmd33(payload: bytes) -> dict:
     return {"variables": variables}
 
 
-def parse_cmd38(payload: bytes) -> dict:
+def parse_cmd38(payload: bytes) -> Cmd38Response | EmptyResponse:
     """Parse Command 38 (Reset Configuration Changed Flag) response.
 
     Format (2 bytes, Wireshark dissect_cmd38, hipflowapp cmd_38.h)::
@@ -774,7 +798,7 @@ def parse_cmd38(payload: bytes) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def parse_cmd35(payload: bytes) -> dict:
+def parse_cmd35(payload: bytes) -> Cmd35Response | EmptyResponse:
     """Parse Command 35 (Write PV Range Values) response.
 
     Format (9 bytes, hipflowapp cmd_35.h insert_Data)::
@@ -796,7 +820,7 @@ def parse_cmd35(payload: bytes) -> dict:
     }
 
 
-def parse_cmd44(payload: bytes) -> dict:
+def parse_cmd44(payload: bytes) -> Cmd44Response | EmptyResponse:
     """Parse Command 44 (Write PV Units) response.
 
     Format (1 byte, hipflowapp cmd_44.h insert_Data)::
@@ -811,7 +835,7 @@ def parse_cmd44(payload: bytes) -> dict:
     }
 
 
-def parse_cmd52(payload: bytes) -> dict:
+def parse_cmd52(payload: bytes) -> Cmd52Response | EmptyResponse:
     """Parse Command 52 (Set Device Variable Zero) response.
 
     Format (1 byte, hipflowapp cmd_52.h insert_Data)::
@@ -823,7 +847,7 @@ def parse_cmd52(payload: bytes) -> dict:
     return {"device_variable_code": payload[0]}
 
 
-def parse_cmd53(payload: bytes) -> dict:
+def parse_cmd53(payload: bytes) -> Cmd53Response | EmptyResponse:
     """Parse Command 53 (Write Device Variable Units) response.
 
     Format (2 bytes, hipflowapp cmd_53.h insert_Data)::
@@ -840,7 +864,7 @@ def parse_cmd53(payload: bytes) -> dict:
     }
 
 
-def parse_cmd54(payload: bytes) -> Cmd54Response | dict:
+def parse_cmd54(payload: bytes) -> Cmd54Response | EmptyResponse:
     """Parse Command 54 (Read Device Variable Information) response.
 
     Format (28 bytes, hipflowapp cmd_54.h insert_Data)::
@@ -859,7 +883,7 @@ def parse_cmd54(payload: bytes) -> Cmd54Response | dict:
     """
     if len(payload) < 7:
         return {}
-    result: dict = {
+    result: Cmd54Response = {
         "device_variable_code": payload[0],
         "sensor_serial_number": (payload[1] << 16) | (payload[2] << 8) | payload[3],
         "units_code": payload[4],
@@ -888,7 +912,7 @@ def parse_cmd54(payload: bytes) -> Cmd54Response | dict:
     return result
 
 
-def parse_cmd71(payload: bytes) -> dict:
+def parse_cmd71(payload: bytes) -> Cmd71Response | EmptyResponse:
     """Parse Command 71 (Lock Device) response.
 
     Command 71 is used to lock or unlock a HART device. Both the request
@@ -907,7 +931,7 @@ def parse_cmd71(payload: bytes) -> dict:
     return {"lock_code": payload[0]}
 
 
-def parse_cmd76(payload: bytes) -> dict:
+def parse_cmd76(payload: bytes) -> Cmd76Response | EmptyResponse:
     """Parse Command 76 (Read Lock Device State) response.
 
     Format (1 byte, CISAGOV Spicy ``ReadLockDeviceStateResponse``)::
@@ -933,7 +957,7 @@ def parse_cmd76(payload: bytes) -> dict:
     }
 
 
-def parse_cmd79(payload: bytes) -> dict:
+def parse_cmd79(payload: bytes) -> Cmd79Response | EmptyResponse:
     """Parse Command 79 (Write Device Variable) response.
 
     Format (8 bytes, hipflowapp cmd_79.h insert_Data)::
@@ -957,7 +981,7 @@ def parse_cmd79(payload: bytes) -> dict:
     }
 
 
-def parse_cmd90(payload: bytes) -> dict:
+def parse_cmd90(payload: bytes) -> Cmd90Response | EmptyResponse:
     """Parse Command 90 (Read Device & Message Timing) response.
 
     Format (15 bytes, hipflowapp cmd_90.h insert_Data)::
@@ -991,7 +1015,7 @@ def parse_cmd90(payload: bytes) -> dict:
     }
 
 
-def parse_cmd95(payload: bytes) -> dict:
+def parse_cmd95(payload: bytes) -> Cmd95Response | EmptyResponse:
     """Parse Command 95 (Read Device Message Statistics) response.
 
     Format (6 bytes, hipflowapp cmd_95.h insert_Data)::
@@ -1014,7 +1038,7 @@ def parse_cmd95(payload: bytes) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def parse_cmd103(payload: bytes) -> dict:
+def parse_cmd103(payload: bytes) -> Cmd103Response | EmptyResponse:
     """Parse Command 103 (Write Burst Period) response.
 
     Format (9 bytes, hipflowapp cmd_c103.h insert_Data)::
@@ -1036,7 +1060,7 @@ def parse_cmd103(payload: bytes) -> dict:
     }
 
 
-def parse_cmd104(payload: bytes) -> dict:
+def parse_cmd104(payload: bytes) -> Cmd104Response | EmptyResponse:
     """Parse Command 104 (Write Burst Trigger) response.
 
     Format (8 bytes, hipflowapp cmd_c104.h insert_Data)::
@@ -1060,7 +1084,7 @@ def parse_cmd104(payload: bytes) -> dict:
     }
 
 
-def parse_cmd105(payload: bytes) -> dict:
+def parse_cmd105(payload: bytes) -> Cmd105Response | EmptyResponse:
     """Parse Command 105 (Read Burst Mode Configuration) response.
 
     Format (29 bytes non-legacy, hipflowapp cmd_c105.h insert_Data)::
@@ -1080,7 +1104,7 @@ def parse_cmd105(payload: bytes) -> dict:
     """
     if len(payload) < 2:
         return {}
-    result: dict = {
+    result: Cmd105Response = {
         "burst_mode_control": payload[0],
         "command_number_legacy": payload[1],
     }
@@ -1112,7 +1136,7 @@ def parse_cmd105(payload: bytes) -> dict:
     return result
 
 
-def parse_cmd107(payload: bytes) -> dict:
+def parse_cmd107(payload: bytes) -> Cmd107Response | EmptyResponse:
     """Parse Command 107 (Write Burst Device Variables) response.
 
     Format (9 bytes, hipflowapp cmd_c107.h insert_Data)::
@@ -1128,7 +1152,7 @@ def parse_cmd107(payload: bytes) -> dict:
     }
 
 
-def parse_cmd108(payload: bytes) -> dict:
+def parse_cmd108(payload: bytes) -> Cmd108Response | EmptyResponse:
     """Parse Command 108 (Write Burst Command Number) response.
 
     Format (hipflowapp cmd_c108.h insert_Data):
@@ -1146,7 +1170,7 @@ def parse_cmd108(payload: bytes) -> dict:
     }
 
 
-def parse_cmd109(payload: bytes) -> dict:
+def parse_cmd109(payload: bytes) -> Cmd109Response | EmptyResponse:
     """Parse Command 109 (Burst Mode Control) response.
 
     Format (hipflowapp cmd_c109.h insert_Data):
@@ -1155,7 +1179,7 @@ def parse_cmd109(payload: bytes) -> dict:
     """
     if len(payload) < 1:
         return {}
-    result: dict = {"burst_mode_control": payload[0]}
+    result: Cmd109Response = {"burst_mode_control": payload[0]}
     if len(payload) >= 2:
         result["burst_message_number"] = payload[1]
     return result
@@ -1166,7 +1190,7 @@ def parse_cmd109(payload: bytes) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def parse_cmd512(payload: bytes) -> dict:
+def parse_cmd512(payload: bytes) -> Cmd512Response | EmptyResponse:
     """Parse Command 512 (Read Country & SI Unit Code) response.
 
     Format (2 bytes, hipflowapp cmd_c512.h insert_Data)::
@@ -1186,7 +1210,7 @@ def parse_cmd512(payload: bytes) -> dict:
 parse_cmd513 = parse_cmd512
 
 
-def parse_cmd534(payload: bytes) -> dict:
+def parse_cmd534(payload: bytes) -> Cmd534Response | EmptyResponse:
     """Parse Command 534 (Read Device Variable Simulation Status) response.
 
     Format (8 bytes, hipflowapp cmd_c534.h insert_Data)::
@@ -1217,7 +1241,10 @@ def parse_cmd534(payload: bytes) -> dict:
 # CISAGOV Zeek Spicy CommandNumber enum naming convention.
 # ---------------------------------------------------------------------------
 
-COMMAND_REGISTRY: dict[int, tuple] = {
+ResponseParser = Callable[[bytes], object]
+"""A ``parse_cmdNN`` function: response payload in, decoded value out."""
+
+COMMAND_REGISTRY: dict[int, tuple[ResponseParser, str]] = {
     0: (parse_cmd0, "read_unique_id"),
     1: (parse_cmd1, "read_primary_variable"),
     2: (parse_cmd2, "read_current_and_percent"),
@@ -1263,7 +1290,7 @@ COMMAND_REGISTRY: dict[int, tuple] = {
 }
 
 
-def get_parser(command: int):
+def get_parser(command: int) -> ResponseParser | None:
     """Look up the parser function for a HART command number.
 
     Args:
@@ -1293,7 +1320,7 @@ def get_command_name(command: int) -> str:
     return f"unknown_cmd_{command}"
 
 
-def parse_command(command: int, payload: bytes):
+def parse_command(command: int, payload: bytes) -> Any:
     """Parse a HART command response payload using the registry.
 
     Args:
@@ -1301,8 +1328,10 @@ def parse_command(command: int, payload: bytes):
         payload: Raw payload bytes (after response_code and device_status).
 
     Returns:
-        Parsed result (type depends on the command), or ``None`` if no
-        parser is registered for the given command number.
+        Parsed result, or ``None`` if no parser is registered for the
+        given command number.  The type depends on *command*, so it is
+        ``Any``; call the ``parse_cmdNN`` function directly for a
+        statically typed result.
     """
     parser = get_parser(command)
     if parser is not None:

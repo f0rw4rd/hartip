@@ -15,6 +15,15 @@ All bit positions cross-referenced with CISAGOV Spicy bitfield definitions.
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .types import (
+        DeviceVariableStatus,
+        StandardizedStatus1,
+        StandardizedStatus2,
+        StandardizedStatus3,
+    )
 
 # ---------------------------------------------------------------------------
 # Device Status Byte (second byte of every HART response)
@@ -173,7 +182,7 @@ _LIMIT_STATUS_NAMES: dict[int, str] = {
 }
 
 
-def decode_device_variable_status(status_byte: int) -> dict:
+def decode_device_variable_status(status_byte: int) -> DeviceVariableStatus:
     """Decode the device variable status byte from Command 9.
 
     Each device variable in Command 9 has an 8-bit status field with
@@ -248,7 +257,7 @@ def decode_standardized_status_0(status_byte: int) -> dict[str, bool]:
     }
 
 
-def decode_standardized_status_1(status_byte: int) -> dict:
+def decode_standardized_status_1(status_byte: int) -> StandardizedStatus1:
     """Decode Standardized Status 1 byte from Command 48 (Common Table 30).
 
     Bit layout (verified from CISAGOV Spicy parser)::
@@ -276,7 +285,7 @@ def decode_standardized_status_1(status_byte: int) -> dict:
     }
 
 
-def decode_standardized_status_2(status_byte: int) -> dict:
+def decode_standardized_status_2(status_byte: int) -> StandardizedStatus2:
     """Decode Standardized Status 2 byte from Command 48 (Common Table 31).
 
     Bit layout (verified from CISAGOV Spicy parser)::
@@ -304,7 +313,7 @@ def decode_standardized_status_2(status_byte: int) -> dict:
     }
 
 
-def decode_standardized_status_3(status_byte: int) -> dict:
+def decode_standardized_status_3(status_byte: int) -> StandardizedStatus3:
     """Decode Standardized Status 3 byte from Command 48 (Common Table 32).
 
     Bit layout (verified from CISAGOV Spicy parser)::
