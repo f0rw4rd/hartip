@@ -2,6 +2,7 @@
 
 import struct
 import warnings
+from itertools import repeat
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,6 +25,7 @@ from hartip.exceptions import (
     HARTResponseError,
 )
 from hartip.protocol import HARTIPHeader, build_pdu
+from tests._mocks import echo_seq, tcp_echo_seq
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -112,10 +114,13 @@ class TestHARTIPClient:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             with HARTIPClient("127.0.0.1", protocol="udp") as client:
                 assert client.connected
                 assert client.session_active
@@ -137,9 +142,12 @@ class TestHARTIPClient:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                ],
+            )
             client = HARTIPClient("127.0.0.1", protocol="udp")
             with pytest.raises(HARTIPConnectionError, match="Session initiate failed"):
                 client.connect()
@@ -159,10 +167,13 @@ class TestHARTIPClient:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
             assert client.session_active
@@ -182,11 +193,14 @@ class TestHARTIPClient:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -208,11 +222,14 @@ class TestHARTIPClient:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
 
             from hartip.constants import MASTER_TYPE_SECONDARY
 
@@ -233,11 +250,14 @@ class TestHARTIPClient:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -258,11 +278,14 @@ class TestHARTIPClient:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -404,8 +427,8 @@ class TestDoubleConnect:
             mock_sock1 = MagicMock()
             mock_sock2 = MagicMock()
             mock_sock_cls.side_effect = [mock_sock1, mock_sock2]
-            mock_sock1.recvfrom.return_value = (session_resp, _ADDR)
-            mock_sock2.recvfrom.return_value = (session_resp, _ADDR)
+            mock_sock1.recvfrom.side_effect = echo_seq(mock_sock1, repeat((session_resp, _ADDR)))
+            mock_sock2.recvfrom.side_effect = echo_seq(mock_sock2, repeat((session_resp, _ADDR)))
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -426,7 +449,7 @@ class TestUseLongFrame:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.return_value = (session_resp, _ADDR)
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, repeat((session_resp, _ADDR)))
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -441,11 +464,14 @@ class TestUseLongFrame:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -469,11 +495,14 @@ class TestExtendedCommand:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -505,11 +534,14 @@ class TestCommErrorDetection:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -528,9 +560,12 @@ class TestCommErrorDetection:
 class TestConvenienceMethods:
     def _make_connected_client(self, mock_sock):
         session_resp = _build_session_init_response()
-        mock_sock.recvfrom.side_effect = [
-            (session_resp, _ADDR),
-        ]
+        mock_sock.recvfrom.side_effect = echo_seq(
+            mock_sock,
+            [
+                (session_resp, _ADDR),
+            ],
+        )
         client = HARTIPClient("127.0.0.1", protocol="udp")
         client.connect()
         return client
@@ -541,7 +576,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_unique_id()
             assert resp.response_code == 0
 
@@ -551,7 +586,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=1, payload=bytes([7]) + struct.pack(">f", 1.5))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_primary_variable()
             assert resp.response_code == 0
 
@@ -561,7 +596,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=9, payload=b"\x00" * 9)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_device_vars_status()
             assert resp.response_code == 0
 
@@ -571,7 +606,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=12, payload=b"\x00" * 24)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_message()
             assert resp.response_code == 0
 
@@ -581,7 +616,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=14, payload=b"\x00" * 16)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_pv_info()
             assert resp.response_code == 0
 
@@ -592,7 +627,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=9, payload=b"\x00" * 9)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_device_vars_status(device_var_codes=(0, 1))
             assert resp.response_code == 0
             # Verify the sent frame includes the 2 var codes in the PDU data
@@ -611,7 +646,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=9, payload=b"\x00" * 25)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_device_vars_status()
             assert resp.response_code == 0
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
@@ -627,7 +662,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=6, payload=bytes([5, 0]))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.write_poll_address(5, loop_current_mode=0)
             assert resp.response_code == 0
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
@@ -644,7 +679,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=6, payload=bytes([63, 1]))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.write_poll_address(0xFF, loop_current_mode=1)
             assert resp.response_code == 0
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
@@ -659,7 +694,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=7, payload=bytes([0, 0]))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_loop_config()
             assert resp.response_code == 0
 
@@ -670,7 +705,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=8, payload=bytes([0, 0, 0, 0]))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_dynamic_var_classifications()
             assert resp.response_code == 0
 
@@ -681,7 +716,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=16, payload=b"\x01\x02\x03")
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_final_assembly()
             assert resp.response_code == 0
 
@@ -692,7 +727,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=17, payload=b"\x00" * 24)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.write_message("HELLO WORLD")
             assert resp.response_code == 0
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
@@ -707,7 +742,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=18, payload=b"\x00" * 21)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.write_tag_descriptor_date(
                 tag="MYTAG", descriptor="DESC", day=15, month=2, year=126
             )
@@ -729,7 +764,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=19, payload=b"\x01\x02\x03")
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.write_final_assembly(0x010203)
             assert resp.response_code == 0
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]
@@ -745,7 +780,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=15, payload=b"\x00" * 18)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_output_info()
             assert resp.response_code == 0
 
@@ -756,7 +791,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=13, payload=b"\x00" * 21)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_tag_descriptor_date()
             assert resp.response_code == 0
 
@@ -767,7 +802,7 @@ class TestConvenienceMethods:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=20, payload=b"\x00" * 32)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_long_tag()
             assert resp.response_code == 0
 
@@ -789,12 +824,15 @@ class TestDelayedResponse:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (dr_resp, _ADDR),  # initial command → DR
-                (ok_resp, _ADDR),  # retry → success
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (dr_resp, _ADDR),  # initial command → DR
+                    (ok_resp, _ADDR),  # retry → success
+                    (close_resp, _ADDR),
+                ],
+            )
 
             client = HARTIPClient(
                 "127.0.0.1",
@@ -1042,9 +1080,12 @@ class TestCiphersParameter:
 class TestConvenienceUniqueAddr:
     def _make_connected_client(self, mock_sock):
         session_resp = _build_session_init_response()
-        mock_sock.recvfrom.side_effect = [
-            (session_resp, _ADDR),
-        ]
+        mock_sock.recvfrom.side_effect = echo_seq(
+            mock_sock,
+            [
+                (session_resp, _ADDR),
+            ],
+        )
         client = HARTIPClient("127.0.0.1", protocol="udp")
         client.connect()
         return client
@@ -1055,7 +1096,7 @@ class TestConvenienceUniqueAddr:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=0, payload=b"\x00" * 12)
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             addr = bytes([0x80, 0x26, 0x01, 0x02, 0x03])
             resp = client.read_unique_id(unique_addr=addr)
             assert resp.response_code == 0
@@ -1076,11 +1117,14 @@ class TestAutoDetectLongFrame:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
 
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
@@ -1115,8 +1159,9 @@ class TestCertValidator:
                 tls_sock.getpeercert.return_value = {"subject": "test"}
                 mock_ctx.wrap_socket.return_value = tls_sock
                 # Make session init succeed
-                session_resp = _build_session_init_response()
-                tls_sock.recv.return_value = session_resp
+                tls_sock.recv.side_effect = tcp_echo_seq(
+                    tls_sock, [_build_session_init_response(), _build_session_close_response()]
+                )
 
                 client = HARTIPClient(
                     "127.0.0.1", protocol="tcp", tls=True, starttls=False, cert_validator=_accept

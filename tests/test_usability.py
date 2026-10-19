@@ -25,6 +25,7 @@ from hartip.device import (
 )
 from hartip.high_level import Device
 from hartip.protocol import HARTIPHeader, build_pdu
+from tests._mocks import echo_seq
 
 # ---------------------------------------------------------------------------
 # Helpers (same pattern as test_client.py)
@@ -142,11 +143,14 @@ class TestDefaultAddress:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
             assert client.default_unique_addr is None
@@ -173,12 +177,15 @@ class TestDefaultAddress:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd0_resp, _ADDR),
-                (cmd1_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd0_resp, _ADDR),
+                    (cmd1_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.connect()
             client.read_unique_id()
@@ -203,11 +210,14 @@ class TestDefaultAddress:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.default_address = 3
             client.connect()
@@ -229,11 +239,14 @@ class TestDefaultAddress:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session_resp, _ADDR),
-                (cmd_resp, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session_resp, _ADDR),
+                    (cmd_resp, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             client = HARTIPClient("127.0.0.1", protocol="udp")
             client.default_unique_addr = bytes([0x80, 0x26, 0x01, 0x02, 0x03])
             client.connect()
@@ -377,13 +390,16 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             assert "Rosemount" in dev.manufacturer_name
             assert dev.device_id == 0x010203
@@ -399,13 +415,16 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             with Device("127.0.0.1", protocol="udp") as dev:
                 assert dev.client.connected
             assert not dev.client.connected
@@ -420,14 +439,17 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (cmd1, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (cmd1, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             pv = dev.primary_variable
             assert pv is not None
@@ -445,14 +467,17 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (cmd2, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (cmd2, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             current = dev.loop_current
             assert current is not None
@@ -469,14 +494,17 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (cmd2, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (cmd2, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             pct = dev.percent_range
             assert pct is not None
@@ -495,14 +523,17 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (cmd3, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (cmd3, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             dvars = dev.dynamic_variables
             assert len(dvars) == 2
@@ -520,14 +551,17 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (cmd9, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (cmd9, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             dvars = dev.device_variables([0])
             assert len(dvars) == 1
@@ -544,14 +578,17 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (cmd48, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (cmd48, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             status = dev.status
             assert "device_specific_status" in status
@@ -571,14 +608,17 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (cmd12, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (cmd12, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             msg = dev.message
             assert "HELLO" in msg
@@ -592,13 +632,16 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             assert isinstance(dev.client, HARTIPClient)
             dev.close()
@@ -611,13 +654,16 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             r = repr(dev)
             assert "Device(" in r
@@ -632,13 +678,16 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             assert isinstance(dev.info, DeviceInfo)
             assert dev.info.manufacturer_id == 0x26
@@ -652,13 +701,16 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (cmd13, _ADDR),
-                (cmd20, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (cmd13, _ADDR),
+                    (cmd20, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp")
             assert dev.manufacturer_id == 0x26
             assert dev.device_type == 0x01
@@ -678,11 +730,14 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp", auto_read_tags=False)
             assert dev.tag == ""
             assert dev.long_tag == ""
@@ -699,11 +754,14 @@ class TestDeviceClass:
         with patch("hartip.client.socket.socket") as mock_sock_cls:
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = [
-                (session, _ADDR),
-                (cmd0, _ADDR),
-                (close_resp, _ADDR),
-            ]
+            mock_sock.recvfrom.side_effect = echo_seq(
+                mock_sock,
+                [
+                    (session, _ADDR),
+                    (cmd0, _ADDR),
+                    (close_resp, _ADDR),
+                ],
+            )
             dev = Device("127.0.0.1", protocol="udp", timeout=10.0, auto_read_tags=False)
             assert dev.client.timeout == 10.0
             dev.close()

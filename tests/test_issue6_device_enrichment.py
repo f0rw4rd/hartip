@@ -24,6 +24,7 @@ from hartip.device import (
     parse_cmd76,
 )
 from hartip.protocol import HARTIPHeader, build_pdu
+from tests._mocks import echo_seq
 
 # ---------------------------------------------------------------------------
 # Helpers (same pattern as test_client.py)
@@ -317,9 +318,12 @@ class TestParseCmd76:
 class TestLockDeviceClient:
     def _make_connected_client(self, mock_sock):
         session_resp = _build_session_init_response()
-        mock_sock.recvfrom.side_effect = [
-            (session_resp, _ADDR),
-        ]
+        mock_sock.recvfrom.side_effect = echo_seq(
+            mock_sock,
+            [
+                (session_resp, _ADDR),
+            ],
+        )
         client = HARTIPClient("127.0.0.1", protocol="udp")
         client.connect()
         return client
@@ -330,7 +334,7 @@ class TestLockDeviceClient:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=71, payload=bytes([1]))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.lock_device(lock_code=1)
             assert resp.response_code == 0
             # Verify command 71 was sent with data byte 1
@@ -346,7 +350,7 @@ class TestLockDeviceClient:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=71, payload=bytes([0]))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.unlock_device()
             assert resp.response_code == 0
             # Verify command 71 with data byte 0 (unlock)
@@ -361,7 +365,7 @@ class TestLockDeviceClient:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=76, payload=bytes([0x01]))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.read_lock_state()
             assert resp.response_code == 0
             # Verify command 76 was sent
@@ -375,7 +379,7 @@ class TestLockDeviceClient:
             mock_sock_cls.return_value = mock_sock
             client = self._make_connected_client(mock_sock)
             cmd_resp = _build_mock_response(command=71, payload=bytes([2]))
-            mock_sock.recvfrom.side_effect = [(cmd_resp, _ADDR)]
+            mock_sock.recvfrom.side_effect = echo_seq(mock_sock, [(cmd_resp, _ADDR)])
             resp = client.lock_device(lock_code=2)
             assert resp.response_code == 0
             sent_frame = mock_sock.sendto.call_args_list[-1][0][0]

@@ -516,7 +516,7 @@ class TestClientAddressHandling:
                     msg_type=1,
                     msg_id=3,
                     status=0,
-                    sequence=1,
+                    sequence=int.from_bytes(frame[4:6], "big"),
                     byte_count=8 + len(pdu),
                 )
             )
@@ -556,7 +556,7 @@ class TestClientAddressHandling:
                     msg_type=1,
                     msg_id=3,
                     status=0,
-                    sequence=1,
+                    sequence=int.from_bytes(frame[4:6], "big"),
                     byte_count=8 + len(pdu),
                 )
             )
@@ -588,7 +588,7 @@ class TestClientAddressHandling:
                     msg_type=1,
                     msg_id=3,
                     status=0,
-                    sequence=1,
+                    sequence=int.from_bytes(frame[4:6], "big"),
                     byte_count=8 + len(pdu),
                 )
             )
@@ -622,7 +622,7 @@ class TestExtendedCommands:
                     msg_type=1,
                     msg_id=3,
                     status=0,
-                    sequence=1,
+                    sequence=int.from_bytes(frame[4:6], "big"),
                     byte_count=8 + len(pdu),
                 )
             )
@@ -654,7 +654,7 @@ class TestExtendedCommands:
                     msg_type=1,
                     msg_id=3,
                     status=0,
-                    sequence=1,
+                    sequence=int.from_bytes(frame[4:6], "big"),
                     byte_count=8 + len(pdu),
                 )
             )
@@ -686,7 +686,7 @@ class TestExtendedCommands:
                     msg_type=1,
                     msg_id=3,
                     status=0,
-                    sequence=1,
+                    sequence=int.from_bytes(frame[4:6], "big"),
                     byte_count=8 + len(pdu),
                 )
             )
